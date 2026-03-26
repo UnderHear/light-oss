@@ -1,0 +1,79 @@
+"use client"
+
+import * as React from "react"
+import { useLocation } from "react-router-dom"
+
+import { NavMain } from "@/components/nav-main"
+import { NavProjects } from "@/components/nav-projects"
+import { NavUser } from "@/components/nav-user"
+import { TeamSwitcher } from "@/components/team-switcher"
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarRail,
+} from "@/components/ui/sidebar"
+import {
+  LayoutDashboardIcon,
+  DatabaseZapIcon,
+  FolderKanbanIcon,
+  Settings2Icon,
+} from "lucide-react"
+import { getApiHostLabel, hasBearerToken } from "@/lib/connection"
+import { useI18n } from "@/lib/i18n"
+import { useAppSettings } from "@/lib/settings"
+
+export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const { pathname } = useLocation()
+  const { settings } = useAppSettings()
+  const { t } = useI18n()
+
+  const data = {
+    workspace: {
+      name: t("app.name"),
+      logo: <DatabaseZapIcon />,
+      meta: getApiHostLabel(settings.apiBaseUrl),
+    },
+    navMain: [
+      {
+        title: t("nav.console"),
+        url: "/console",
+        icon: <LayoutDashboardIcon />,
+        isActive: pathname === "/" || pathname.startsWith("/console"),
+      },
+      {
+        title: t("nav.buckets"),
+        url: "/buckets",
+        icon: <FolderKanbanIcon />,
+        isActive: pathname.startsWith("/buckets"),
+      },
+      {
+        title: t("nav.settings"),
+        url: "/settings",
+        icon: <Settings2Icon />,
+        isActive: pathname.startsWith("/settings"),
+      },
+    ],
+    connection: {
+      host: getApiHostLabel(settings.apiBaseUrl),
+      tokenConfigured: hasBearerToken(settings.bearerToken),
+    },
+  }
+
+  return (
+    <Sidebar collapsible="icon" {...props}>
+      <SidebarHeader>
+        <TeamSwitcher workspace={data.workspace} />
+      </SidebarHeader>
+      <SidebarContent>
+        <NavMain items={data.navMain} />
+        <NavProjects connection={data.connection} />
+      </SidebarContent>
+      <SidebarFooter>
+        <NavUser />
+      </SidebarFooter>
+      <SidebarRail />
+    </Sidebar>
+  )
+}

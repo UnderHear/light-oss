@@ -48,6 +48,11 @@ type createBucketRequest struct {
 	Name string `json:"name"`
 }
 
+type createFolderRequest struct {
+	Prefix string `json:"prefix"`
+	Name   string `json:"name"`
+}
+
 type signDownloadRequest struct {
 	Bucket           string `json:"bucket"`
 	ObjectKey        string `json:"object_key"`
@@ -72,6 +77,26 @@ type objectResponse struct {
 	Visibility       string    `json:"visibility"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type folderNodeResponse struct {
+	Path       string `json:"path"`
+	Name       string `json:"name"`
+	ParentPath string `json:"parent_path"`
+}
+
+type explorerEntryResponse struct {
+	Type             string     `json:"type"`
+	Path             string     `json:"path"`
+	Name             string     `json:"name"`
+	IsEmpty          *bool      `json:"is_empty"`
+	ObjectKey        *string    `json:"object_key"`
+	OriginalFilename *string    `json:"original_filename"`
+	Size             *int64     `json:"size"`
+	ContentType      *string    `json:"content_type"`
+	ETag             *string    `json:"etag"`
+	Visibility       *string    `json:"visibility"`
+	UpdatedAt        *time.Time `json:"updated_at"`
 }
 
 func NewRouter(deps Dependencies) *gin.Engine {
@@ -114,6 +139,10 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	protected.Use(deps.AuthValidator.RequireBearer())
 	protected.POST("/buckets", handler.createBucket)
 	protected.GET("/buckets", handler.listBuckets)
+	protected.GET("/buckets/:bucket/folders", handler.listFolders)
+	protected.POST("/buckets/:bucket/folders", handler.createFolder)
+	protected.DELETE("/buckets/:bucket/folders", handler.deleteFolder)
+	protected.GET("/buckets/:bucket/entries", handler.listExplorerEntries)
 	protected.PUT("/buckets/:bucket/objects/*key", middleware.MaxBodySize(deps.Config.MaxUploadSizeBytes), handler.uploadObject)
 	protected.GET("/buckets/:bucket/objects", handler.listObjects)
 	protected.DELETE("/buckets/:bucket/objects/*key", handler.deleteObject)
@@ -172,6 +201,75 @@ func (h *apiHandler) listBuckets(c *gin.Context) {
 	}
 
 	response.JSON(c, http.StatusOK, gin.H{"items": items})
+}
+
+func (h *apiHandler) listFolders(c *gin.Context) {
+	items, err := h.objectService.ListFolders(c.Request.Context(), c.Param("bucket"))
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	result := make([]folderNodeResponse, 0, len(items))
+	for _, item := range items {
+		result = append(result, folderNodeToResponse(item))
+	}
+
+	response.JSON(c, http.StatusOK, gin.H{"items": result})
+}
+
+func (h *apiHandler) createFolder(c *gin.Context) {
+	var req createFolderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, apperrors.New(http.StatusBadRequest, "invalid_request", "request body is invalid"))
+		return
+	}
+
+	folder, err := h.objectService.CreateFolder(c.Request.Context(), service.CreateFolderInput{
+		BucketName: c.Param("bucket"),
+		Prefix:     req.Prefix,
+		Name:       req.Name,
+	})
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.JSON(c, http.StatusCreated, folderNodeToResponse(*folder))
+}
+
+func (h *apiHandler) deleteFolder(c *gin.Context) {
+	if err := h.objectService.DeleteFolder(c.Request.Context(), c.Param("bucket"), c.Query("path")); err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.NoContent(c, http.StatusNoContent)
+}
+
+func (h *apiHandler) listExplorerEntries(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	result, err := h.objectService.ListExplorerEntries(c.Request.Context(), service.ListExplorerEntriesInput{
+		BucketName: c.Param("bucket"),
+		Prefix:     c.Query("prefix"),
+		Search:     c.Query("search"),
+		Limit:      limit,
+		Cursor:     c.Query("cursor"),
+	})
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	items := make([]explorerEntryResponse, 0, len(result.Items))
+	for _, item := range result.Items {
+		items = append(items, explorerEntryToResponse(item))
+	}
+
+	response.JSON(c, http.StatusOK, gin.H{
+		"items":       items,
+		"next_cursor": result.NextCursor,
+	})
 }
 
 func (h *apiHandler) uploadObject(c *gin.Context) {
@@ -320,6 +418,50 @@ func objectToResponse(object model.Object) objectResponse {
 		CreatedAt:        object.CreatedAt,
 		UpdatedAt:        object.UpdatedAt,
 	}
+}
+
+func folderNodeToResponse(node service.FolderNode) folderNodeResponse {
+	return folderNodeResponse{
+		Path:       node.Path,
+		Name:       node.Name,
+		ParentPath: node.ParentPath,
+	}
+}
+
+func explorerEntryToResponse(entry service.ExplorerEntry) explorerEntryResponse {
+	response := explorerEntryResponse{
+		Type: string(entry.Type),
+		Path: entry.Path,
+		Name: entry.Name,
+	}
+
+	if entry.Type == service.ExplorerEntryTypeDirectory {
+		isEmpty := entry.IsEmpty
+		response.IsEmpty = &isEmpty
+		return response
+	}
+
+	if entry.Object == nil {
+		return response
+	}
+
+	objectKey := entry.Object.ObjectKey
+	originalFilename := entry.Object.OriginalFilename
+	size := entry.Object.Size
+	contentType := entry.Object.ContentType
+	etag := entry.Object.ETag
+	visibility := string(entry.Object.Visibility)
+	updatedAt := entry.Object.UpdatedAt
+
+	response.ObjectKey = &objectKey
+	response.OriginalFilename = &originalFilename
+	response.Size = &size
+	response.ContentType = &contentType
+	response.ETag = &etag
+	response.Visibility = &visibility
+	response.UpdatedAt = &updatedAt
+
+	return response
 }
 
 func normalizeObjectKey(raw string) string {

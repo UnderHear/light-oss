@@ -40,6 +40,51 @@ export interface ObjectListResult {
   next_cursor: string;
 }
 
+export interface FolderNode {
+  path: string;
+  name: string;
+  parent_path: string;
+}
+
+export interface FolderListResult {
+  items: FolderNode[];
+}
+
+export interface ExplorerDirectoryEntry {
+  type: "directory";
+  path: string;
+  name: string;
+  is_empty: boolean | null;
+  object_key: null;
+  original_filename: null;
+  size: null;
+  content_type: null;
+  etag: null;
+  visibility: null;
+  updated_at: null;
+}
+
+export interface ExplorerFileEntry {
+  type: "file";
+  path: string;
+  name: string;
+  is_empty: null;
+  object_key: string;
+  original_filename: string;
+  size: number;
+  content_type: string;
+  etag: string;
+  visibility: ObjectVisibility;
+  updated_at: string;
+}
+
+export type ExplorerEntry = ExplorerDirectoryEntry | ExplorerFileEntry;
+
+export interface ExplorerEntriesResult {
+  items: ExplorerEntry[];
+  next_cursor: string;
+}
+
 export interface SignedDownloadResult {
   url: string;
   expires_at: number;

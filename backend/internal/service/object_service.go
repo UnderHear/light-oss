@@ -62,7 +62,7 @@ func (s *ObjectService) Upload(ctx context.Context, input UploadObjectInput) (*m
 	if err := ValidateBucketName(input.BucketName); err != nil {
 		return nil, err
 	}
-	if err := ValidateObjectKey(input.ObjectKey); err != nil {
+	if err := ValidateUserObjectKey(input.ObjectKey); err != nil {
 		return nil, err
 	}
 

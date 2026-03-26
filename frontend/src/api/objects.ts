@@ -2,6 +2,8 @@ import { ApiError, apiRequest, createApiClient } from "./client";
 import type { AxiosProgressEvent } from "axios";
 import type { AppSettings } from "../lib/settings";
 import type {
+  ExplorerEntriesResult,
+  FolderListResult,
   ObjectItem,
   ObjectListResult,
   ObjectVisibility,
@@ -23,6 +25,20 @@ export interface UploadObjectParams {
   onProgress?: (value: number) => void;
 }
 
+export interface ListExplorerEntriesParams {
+  bucket: string;
+  prefix: string;
+  search: string;
+  limit: number;
+  cursor: string;
+}
+
+export interface CreateFolderParams {
+  bucket: string;
+  prefix: string;
+  name: string;
+}
+
 export function listObjects(settings: AppSettings, params: ListObjectsParams) {
   return apiRequest<ObjectListResult>(settings, {
     method: "GET",
@@ -31,6 +47,54 @@ export function listObjects(settings: AppSettings, params: ListObjectsParams) {
       prefix: params.prefix || undefined,
       limit: params.limit,
       cursor: params.cursor || undefined,
+    },
+  });
+}
+
+export function listFolderTree(settings: AppSettings, bucket: string) {
+  return apiRequest<FolderListResult>(settings, {
+    method: "GET",
+    url: `/api/v1/buckets/${encodeURIComponent(bucket)}/folders`,
+  });
+}
+
+export function listExplorerEntries(
+  settings: AppSettings,
+  params: ListExplorerEntriesParams,
+) {
+  return apiRequest<ExplorerEntriesResult>(settings, {
+    method: "GET",
+    url: `/api/v1/buckets/${encodeURIComponent(params.bucket)}/entries`,
+    params: {
+      prefix: params.prefix || undefined,
+      search: params.search || undefined,
+      limit: params.limit,
+      cursor: params.cursor || undefined,
+    },
+  });
+}
+
+export function createFolder(settings: AppSettings, params: CreateFolderParams) {
+  return apiRequest(settings, {
+    method: "POST",
+    url: `/api/v1/buckets/${encodeURIComponent(params.bucket)}/folders`,
+    data: {
+      prefix: params.prefix,
+      name: params.name,
+    },
+  });
+}
+
+export function deleteFolder(
+  settings: AppSettings,
+  bucket: string,
+  folderPath: string,
+) {
+  return apiRequest<void>(settings, {
+    method: "DELETE",
+    url: `/api/v1/buckets/${encodeURIComponent(bucket)}/folders`,
+    params: {
+      path: folderPath,
     },
   });
 }
@@ -49,7 +113,7 @@ export async function uploadObject(
       headers: {
         "Content-Type": params.file.type || "application/octet-stream",
         "X-Object-Visibility": params.visibility,
-        "X-Original-Filename": params.file.name,
+        "X-Original-Filename": encodeHeaderFilename(params.file.name),
       },
       onUploadProgress: (event: AxiosProgressEvent) => {
         if (!params.onProgress || !event.total) {
@@ -115,4 +179,8 @@ function encodeObjectKey(objectKey: string) {
     .split("/")
     .map((segment) => encodeURIComponent(segment))
     .join("/");
+}
+
+function encodeHeaderFilename(filename: string) {
+  return encodeURIComponent(filename);
 }

@@ -41,14 +41,38 @@ type bucketListResponse struct {
 }
 
 type objectResponse struct {
-	ObjectKey  string `json:"object_key"`
-	Visibility string `json:"visibility"`
-	Size       int64  `json:"size"`
+	ObjectKey         string `json:"object_key"`
+	OriginalFilename  string `json:"original_filename"`
+	Visibility        string `json:"visibility"`
+	Size              int64  `json:"size"`
 }
 
 type objectListResponse struct {
 	Items      []objectResponse `json:"items"`
 	NextCursor string           `json:"next_cursor"`
+}
+
+type folderNodeResponse struct {
+	Path       string `json:"path"`
+	Name       string `json:"name"`
+	ParentPath string `json:"parent_path"`
+}
+
+type folderListResponse struct {
+	Items []folderNodeResponse `json:"items"`
+}
+
+type explorerEntryResponse struct {
+	Type      string  `json:"type"`
+	Path      string  `json:"path"`
+	Name      string  `json:"name"`
+	IsEmpty   *bool   `json:"is_empty"`
+	ObjectKey *string `json:"object_key"`
+}
+
+type explorerListResponse struct {
+	Items      []explorerEntryResponse `json:"items"`
+	NextCursor string                  `json:"next_cursor"`
 }
 
 type signResponse struct {
@@ -82,6 +106,12 @@ func TestUploadAndDownloadPublicObject(t *testing.T) {
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var uploadBody apiEnvelope[objectResponse]
+	decodeJSON(t, rec.Body.Bytes(), &uploadBody)
+	if uploadBody.Data.OriginalFilename != "readme.txt" {
+		t.Fatalf("unexpected original filename %q", uploadBody.Data.OriginalFilename)
 	}
 
 	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/buckets/public-bucket/objects/docs/readme.txt", nil)
@@ -203,6 +233,173 @@ func TestListObjectsPaginationAndPrefix(t *testing.T) {
 	}
 }
 
+func TestUploadDecodesEncodedOriginalFilenameHeader(t *testing.T) {
+	router := newTestRouter(t, 1024)
+
+	createBucket(t, router, "encoded-bucket")
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/buckets/encoded-bucket/objects/docs/report.txt", strings.NewReader("hello"))
+	req.Header.Set("Authorization", "Bearer dev-token")
+	req.Header.Set("X-Object-Visibility", "public")
+	req.Header.Set("X-Original-Filename", url.PathEscape("中文报告.txt"))
+	req.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var uploadBody apiEnvelope[objectResponse]
+	decodeJSON(t, rec.Body.Bytes(), &uploadBody)
+	if uploadBody.Data.OriginalFilename != "中文报告.txt" {
+		t.Fatalf("unexpected original filename %q", uploadBody.Data.OriginalFilename)
+	}
+}
+
+func TestListFoldersAndExplorerEntries(t *testing.T) {
+	router := newTestRouter(t, 1024)
+
+	createBucket(t, router, "tree-bucket")
+	uploadObject(t, router, "/api/v1/buckets/tree-bucket/objects/docs/alpha.txt", "A", "public")
+	uploadObject(t, router, "/api/v1/buckets/tree-bucket/objects/docs/zeta.txt", "Z", "public")
+	uploadObject(t, router, "/api/v1/buckets/tree-bucket/objects/docs/images/c.txt", "C", "public")
+	createFolder(t, router, "tree-bucket", "docs/", "empty")
+
+	foldersReq := httptest.NewRequest(http.MethodGet, "/api/v1/buckets/tree-bucket/folders", nil)
+	foldersReq.Header.Set("Authorization", "Bearer dev-token")
+	foldersRec := httptest.NewRecorder()
+	router.ServeHTTP(foldersRec, foldersReq)
+	if foldersRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", foldersRec.Code, foldersRec.Body.String())
+	}
+
+	var foldersBody apiEnvelope[folderListResponse]
+	decodeJSON(t, foldersRec.Body.Bytes(), &foldersBody)
+	if len(foldersBody.Data.Items) != 3 {
+		t.Fatalf("unexpected folder count: %+v", foldersBody.Data.Items)
+	}
+	if foldersBody.Data.Items[0].Path != "docs/" || foldersBody.Data.Items[1].Path != "docs/empty/" || foldersBody.Data.Items[2].Path != "docs/images/" {
+		t.Fatalf("unexpected folders: %+v", foldersBody.Data.Items)
+	}
+
+	firstEntriesReq := httptest.NewRequest(http.MethodGet, "/api/v1/buckets/tree-bucket/entries?prefix=docs/&limit=2", nil)
+	firstEntriesReq.Header.Set("Authorization", "Bearer dev-token")
+	firstEntriesRec := httptest.NewRecorder()
+	router.ServeHTTP(firstEntriesRec, firstEntriesReq)
+	if firstEntriesRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", firstEntriesRec.Code, firstEntriesRec.Body.String())
+	}
+
+	var firstEntriesBody apiEnvelope[explorerListResponse]
+	decodeJSON(t, firstEntriesRec.Body.Bytes(), &firstEntriesBody)
+	if len(firstEntriesBody.Data.Items) != 2 {
+		t.Fatalf("unexpected first entries page: %+v", firstEntriesBody.Data.Items)
+	}
+	if firstEntriesBody.Data.Items[0].Type != "directory" || firstEntriesBody.Data.Items[0].Name != "empty" {
+		t.Fatalf("unexpected first directory entry: %+v", firstEntriesBody.Data.Items[0])
+	}
+	if firstEntriesBody.Data.Items[0].IsEmpty == nil || !*firstEntriesBody.Data.Items[0].IsEmpty {
+		t.Fatalf("expected empty directory flag on %+v", firstEntriesBody.Data.Items[0])
+	}
+	if firstEntriesBody.Data.Items[1].Type != "directory" || firstEntriesBody.Data.Items[1].Name != "images" {
+		t.Fatalf("unexpected second directory entry: %+v", firstEntriesBody.Data.Items[1])
+	}
+	if firstEntriesBody.Data.NextCursor == "" {
+		t.Fatalf("expected next cursor for first entries page")
+	}
+
+	secondEntriesReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/buckets/tree-bucket/entries?prefix=docs/&limit=2&cursor="+url.QueryEscape(firstEntriesBody.Data.NextCursor),
+		nil,
+	)
+	secondEntriesReq.Header.Set("Authorization", "Bearer dev-token")
+	secondEntriesRec := httptest.NewRecorder()
+	router.ServeHTTP(secondEntriesRec, secondEntriesReq)
+	if secondEntriesRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", secondEntriesRec.Code, secondEntriesRec.Body.String())
+	}
+
+	var secondEntriesBody apiEnvelope[explorerListResponse]
+	decodeJSON(t, secondEntriesRec.Body.Bytes(), &secondEntriesBody)
+	if len(secondEntriesBody.Data.Items) != 2 {
+		t.Fatalf("unexpected second entries page: %+v", secondEntriesBody.Data.Items)
+	}
+	if secondEntriesBody.Data.Items[0].Type != "file" || secondEntriesBody.Data.Items[0].Name != "alpha.txt" {
+		t.Fatalf("unexpected file entry: %+v", secondEntriesBody.Data.Items[0])
+	}
+	if secondEntriesBody.Data.Items[1].Type != "file" || secondEntriesBody.Data.Items[1].Name != "zeta.txt" {
+		t.Fatalf("unexpected file entry: %+v", secondEntriesBody.Data.Items[1])
+	}
+
+	searchReq := httptest.NewRequest(http.MethodGet, "/api/v1/buckets/tree-bucket/entries?prefix=docs/&search=alp", nil)
+	searchReq.Header.Set("Authorization", "Bearer dev-token")
+	searchRec := httptest.NewRecorder()
+	router.ServeHTTP(searchRec, searchReq)
+	if searchRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", searchRec.Code, searchRec.Body.String())
+	}
+
+	var searchBody apiEnvelope[explorerListResponse]
+	decodeJSON(t, searchRec.Body.Bytes(), &searchBody)
+	if len(searchBody.Data.Items) != 1 || searchBody.Data.Items[0].Name != "alpha.txt" {
+		t.Fatalf("unexpected search results: %+v", searchBody.Data.Items)
+	}
+}
+
+func TestCreateAndDeleteFolder(t *testing.T) {
+	router := newTestRouter(t, 1024)
+
+	createBucket(t, router, "folder-bucket")
+	createFolder(t, router, "folder-bucket", "", "empty")
+
+	duplicateReq := httptest.NewRequest(http.MethodPost, "/api/v1/buckets/folder-bucket/folders", bytes.NewBufferString(`{"prefix":"","name":"empty"}`))
+	duplicateReq.Header.Set("Authorization", "Bearer dev-token")
+	duplicateReq.Header.Set("Content-Type", "application/json")
+	duplicateRec := httptest.NewRecorder()
+	router.ServeHTTP(duplicateRec, duplicateReq)
+	if duplicateRec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d, body=%s", duplicateRec.Code, duplicateRec.Body.String())
+	}
+
+	deleteEmptyReq := httptest.NewRequest(http.MethodDelete, "/api/v1/buckets/folder-bucket/folders?path="+url.QueryEscape("empty/"), nil)
+	deleteEmptyReq.Header.Set("Authorization", "Bearer dev-token")
+	deleteEmptyRec := httptest.NewRecorder()
+	router.ServeHTTP(deleteEmptyRec, deleteEmptyReq)
+	if deleteEmptyRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d, body=%s", deleteEmptyRec.Code, deleteEmptyRec.Body.String())
+	}
+
+	uploadObject(t, router, "/api/v1/buckets/folder-bucket/objects/docs/readme.txt", "hello", "public")
+
+	deleteNonEmptyReq := httptest.NewRequest(http.MethodDelete, "/api/v1/buckets/folder-bucket/folders?path="+url.QueryEscape("docs/"), nil)
+	deleteNonEmptyReq.Header.Set("Authorization", "Bearer dev-token")
+	deleteNonEmptyRec := httptest.NewRecorder()
+	router.ServeHTTP(deleteNonEmptyRec, deleteNonEmptyReq)
+	if deleteNonEmptyRec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d, body=%s", deleteNonEmptyRec.Code, deleteNonEmptyRec.Body.String())
+	}
+}
+
+func TestUploadRejectsReservedFolderMarkerName(t *testing.T) {
+	router := newTestRouter(t, 1024)
+
+	createBucket(t, router, "reserved-bucket")
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/buckets/reserved-bucket/objects/docs/.light-oss-folder", strings.NewReader("bad"))
+	req.Header.Set("Authorization", "Bearer dev-token")
+	req.Header.Set("X-Object-Visibility", "private")
+	req.Header.Set("X-Original-Filename", ".light-oss-folder")
+	req.Header.Set("Content-Type", "text/plain")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestUploadSizeLimit(t *testing.T) {
 	router := newTestRouter(t, 4)
 
@@ -295,6 +492,18 @@ func uploadObject(t *testing.T, router *gin.Engine, path string, body string, vi
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("upload expected 201, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func createFolder(t *testing.T, router *gin.Engine, bucket string, prefix string, name string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/buckets/"+bucket+"/folders", bytes.NewBufferString(`{"prefix":"`+prefix+`","name":"`+name+`"}`))
+	req.Header.Set("Authorization", "Bearer dev-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create folder expected 201, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 }
 

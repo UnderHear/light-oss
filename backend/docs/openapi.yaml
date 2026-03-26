@@ -62,6 +62,93 @@ paths:
       responses:
         '200':
           description: Object list
+  /api/v1/buckets/{bucket}/folders:
+    get:
+      summary: List full folder tree
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: bucket
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Folder tree
+    post:
+      summary: Create folder
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: bucket
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prefix, name]
+              properties:
+                prefix:
+                  type: string
+                name:
+                  type: string
+      responses:
+        '201':
+          description: Folder created
+    delete:
+      summary: Delete empty folder
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: bucket
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Folder deleted
+  /api/v1/buckets/{bucket}/entries:
+    get:
+      summary: List direct folder entries
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: bucket
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: prefix
+          schema:
+            type: string
+        - in: query
+          name: search
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+        - in: query
+          name: cursor
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Direct folder entries
   /api/v1/buckets/{bucket}/objects/{key}:
     get:
       summary: Download object

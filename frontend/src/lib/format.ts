@@ -1,3 +1,5 @@
+import type { AppLocale } from "./preferences";
+
 export function formatBytes(value: number) {
   if (value === 0) {
     return "0 B";
@@ -12,8 +14,8 @@ export function formatBytes(value: number) {
   return `${size.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
 }
 
-export function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
+export function formatDate(value: string, locale: AppLocale) {
+  return new Intl.DateTimeFormat(locale, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(value));

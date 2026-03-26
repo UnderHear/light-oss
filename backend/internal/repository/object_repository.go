@@ -97,6 +97,70 @@ func (r *ObjectRepository) ListActive(ctx context.Context, params ListObjectsPar
 	return objects, err
 }
 
+func (r *ObjectRepository) ListActiveByPrefixOrdered(ctx context.Context, bucketName string, prefix string) ([]model.Object, error) {
+	var objects []model.Object
+
+	query := r.db.WithContext(ctx).
+		Where("bucket_name = ? AND is_deleted = ?", bucketName, false)
+
+	if prefix != "" {
+		query = query.Where("object_key LIKE ?", prefix+"%")
+	}
+
+	err := query.
+		Order("object_key ASC").
+		Find(&objects).Error
+	return objects, err
+}
+
+func (r *ObjectRepository) ListActiveKeys(ctx context.Context, bucketName string) ([]string, error) {
+	var keys []string
+
+	err := r.db.WithContext(ctx).
+		Model(&model.Object{}).
+		Where("bucket_name = ? AND is_deleted = ?", bucketName, false).
+		Order("object_key ASC").
+		Pluck("object_key", &keys).Error
+	return keys, err
+}
+
+func (r *ObjectRepository) ExistsActiveWithPrefix(ctx context.Context, bucketName string, prefix string) (bool, error) {
+	var count int64
+
+	query := r.db.WithContext(ctx).
+		Model(&model.Object{}).
+		Where("bucket_name = ? AND is_deleted = ?", bucketName, false)
+
+	if prefix != "" {
+		query = query.Where("object_key LIKE ?", prefix+"%")
+	}
+
+	if err := query.Count(&count).Error; err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
+func (r *ObjectRepository) ExistsActiveWithPrefixExceptKey(ctx context.Context, bucketName string, prefix string, excludedKey string) (bool, error) {
+	var count int64
+
+	query := r.db.WithContext(ctx).
+		Model(&model.Object{}).
+		Where("bucket_name = ? AND is_deleted = ?", bucketName, false).
+		Where("object_key LIKE ?", prefix+"%")
+
+	if excludedKey != "" {
+		query = query.Where("object_key <> ?", excludedKey)
+	}
+
+	if err := query.Count(&count).Error; err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
+
 func (r *ObjectRepository) SoftDelete(ctx context.Context, bucketName string, objectKey string) (bool, error) {
 	result := r.db.WithContext(ctx).Model(&model.Object{}).
 		Where("bucket_name = ? AND object_key = ? AND is_deleted = ?", bucketName, objectKey, false).

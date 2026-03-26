@@ -1,14 +1,13 @@
 "use client"
 
 import {
-  DatabaseIcon,
+  ServerIcon,
   ShieldCheckIcon,
 } from "lucide-react"
 import {
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
-  SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { useI18n } from "@/lib/i18n"
@@ -28,26 +27,20 @@ export function NavProjects({
       <SidebarGroupLabel>{t("header.connection")}</SidebarGroupLabel>
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton tooltip={connection.host} variant="outline">
-            <DatabaseIcon />
+          <div className="flex w-full min-w-0 items-center gap-2 overflow-hidden px-2 py-1 text-sm text-sidebar-foreground [&>span:last-child]:truncate [&_svg]:size-4 [&_svg]:shrink-0">
+            <ServerIcon />
             <span>{connection.host}</span>
-          </SidebarMenuButton>
+          </div>
         </SidebarMenuItem>
         <SidebarMenuItem>
-          <SidebarMenuButton
-            tooltip={
-              connection.tokenConfigured
-                ? t("header.authConfigured")
-                : t("header.authMissing")
-            }
-          >
+          <div className="flex w-full min-w-0 items-center gap-2 overflow-hidden px-2 py-1 text-sm text-sidebar-foreground [&>span:last-child]:truncate [&_svg]:size-4 [&_svg]:shrink-0">
             <ShieldCheckIcon />
             <span>
               {connection.tokenConfigured
                 ? t("header.authConfigured")
                 : t("header.authMissing")}
             </span>
-          </SidebarMenuButton>
+          </div>
         </SidebarMenuItem>
       </SidebarMenu>
     </SidebarGroup>

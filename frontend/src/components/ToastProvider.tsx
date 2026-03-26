@@ -27,7 +27,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ pushToast }}>
       {children}
-      <Toaster position="bottom-right" />
+      <Toaster offset={{ top: 64 }} position="top-center" />
     </ToastContext.Provider>
   );
 }

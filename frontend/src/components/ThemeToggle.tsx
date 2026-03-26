@@ -1,7 +1,7 @@
 import { MoonStarIcon, SunMediumIcon } from "lucide-react";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useAppPreferences, type AppTheme } from "@/lib/preferences";
+import { useAppPreferences } from "@/lib/preferences";
 import { useI18n } from "@/lib/i18n";
 
 export function ThemeToggle({
@@ -16,29 +16,18 @@ export function ThemeToggle({
     setTheme,
   } = useAppPreferences();
   const { t } = useI18n();
+  const buttonSize = size === "default" ? "icon" : "icon-sm";
 
   return (
-    <ToggleGroup
+    <Button
       aria-label={t("header.compactThemeSwitch")}
-      className={cn("w-full justify-start", className)}
-      onValueChange={(value) => {
-        if (value) {
-          setTheme(value as AppTheme);
-        }
-      }}
-      size={size}
-      type="single"
-      value={theme}
+      className={cn(className)}
+      onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+      size={buttonSize}
+      type="button"
       variant="outline"
     >
-      <ToggleGroupItem value="light">
-        <SunMediumIcon data-icon="inline-start" />
-        {t("theme.light")}
-      </ToggleGroupItem>
-      <ToggleGroupItem value="dark">
-        <MoonStarIcon data-icon="inline-start" />
-        {t("theme.dark")}
-      </ToggleGroupItem>
-    </ToggleGroup>
+      {theme === "light" ? <SunMediumIcon /> : <MoonStarIcon />}
+    </Button>
   );
 }

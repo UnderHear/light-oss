@@ -1,4 +1,11 @@
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { LanguagesIcon } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useAppPreferences, type AppLocale } from "@/lib/preferences";
 import { useI18n } from "@/lib/i18n";
@@ -15,23 +22,41 @@ export function LocaleToggle({
     setLocale,
   } = useAppPreferences();
   const { t } = useI18n();
+  const buttonSize = size === "default" ? "icon" : "icon-sm";
 
   return (
-    <ToggleGroup
-      aria-label={t("header.compactLanguageSwitch")}
-      className={cn("w-full justify-start", className)}
-      onValueChange={(value) => {
-        if (value) {
-          setLocale(value as AppLocale);
-        }
-      }}
-      size={size}
-      type="single"
-      value={locale}
-      variant="outline"
-    >
-      <ToggleGroupItem value="en-US">{t("locale.en")}</ToggleGroupItem>
-      <ToggleGroupItem value="zh-CN">{t("locale.zh")}</ToggleGroupItem>
-    </ToggleGroup>
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={t("header.compactLanguageSwitch")}
+        className={cn(
+          buttonVariants({ size: buttonSize, variant: "outline" }),
+          className,
+        )}
+        type="button"
+      >
+        <LanguagesIcon />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-28" sideOffset={8}>
+        {[
+          { value: "zh-CN", label: "简体中文" },
+          { value: "en-US", label: "English" },
+        ].map((option) => (
+          <DropdownMenuItem
+            className="cursor-pointer"
+            key={option.value}
+            onSelect={() => setLocale(option.value as AppLocale)}
+          >
+            <span
+              className={cn(
+                "w-full",
+                locale === option.value && "font-medium text-foreground",
+              )}
+            >
+              {option.label}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

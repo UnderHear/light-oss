@@ -17,7 +17,7 @@ import {
 import {
   LayoutDashboardIcon,
   DatabaseZapIcon,
-  FolderKanbanIcon,
+  HardDriveIcon,
   Settings2Icon,
 } from "lucide-react"
 import { getApiHostLabel, hasBearerToken } from "@/lib/connection"
@@ -45,7 +45,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
       {
         title: t("nav.buckets"),
         url: "/buckets",
-        icon: <FolderKanbanIcon />,
+        icon: <HardDriveIcon />,
         isActive: pathname.startsWith("/buckets"),
       },
       {

@@ -1,7 +1,7 @@
 export function getApiHostLabel(apiBaseUrl: string) {
   const trimmed = apiBaseUrl.trim();
   if (!trimmed) {
-    return "—";
+    return "-";
   }
 
   try {

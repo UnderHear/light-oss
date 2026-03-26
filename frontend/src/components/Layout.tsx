@@ -64,8 +64,8 @@ export function Layout() {
             </Breadcrumb>
 
             <div className="hidden items-center gap-2 lg:flex">
-              <LocaleToggle className="w-auto" />
-              <ThemeToggle className="w-auto" />
+              <LocaleToggle />
+              <ThemeToggle />
             </div>
           </div>
         </header>

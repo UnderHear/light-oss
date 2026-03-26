@@ -1,6 +1,7 @@
 backend/server.exe
 backend/coverage.out
 backend/*.test
+backend/server
 
 frontend/node_modules/
 frontend/dist/

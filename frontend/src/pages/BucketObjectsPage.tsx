@@ -21,6 +21,7 @@ import {
   deleteFolder,
   deleteObject,
   listExplorerEntries,
+  updateObjectVisibility,
   uploadObject,
 } from "@/api/objects";
 import { EmptyState } from "@/components/EmptyState";
@@ -208,6 +209,18 @@ export function BucketObjectsPage() {
     },
   });
 
+  const updateVisibilityMutation = useMutation({
+    mutationFn: (input: { objectKey: string; visibility: "public" | "private" }) =>
+      updateObjectVisibility(settings, {
+        bucket,
+        objectKey: input.objectKey,
+        visibility: input.visibility,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: entriesBaseQueryKey });
+    },
+  });
+
   const breadcrumbs = getExplorerBreadcrumbs(prefix);
   const entries = entriesQuery.data?.items ?? [];
 
@@ -265,6 +278,13 @@ export function BucketObjectsPage() {
 
   async function handleSignDownload(objectKey: string) {
     await signMutation.mutateAsync(objectKey);
+  }
+
+  async function handleUpdateVisibility(
+    objectKey: string,
+    visibility: "public" | "private",
+  ) {
+    await updateVisibilityMutation.mutateAsync({ objectKey, visibility });
   }
 
   function handleSearchSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -442,6 +462,7 @@ export function BucketObjectsPage() {
                     onDeleteFolder={handleDeleteFolder}
                     onOpenDirectory={handleNavigatePrefix}
                     onSignDownload={handleSignDownload}
+                    onUpdateVisibility={handleUpdateVisibility}
                     signingPath={signingPath}
                   />
                 </div>

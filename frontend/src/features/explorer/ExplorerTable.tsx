@@ -1,6 +1,7 @@
 import {
   CopyIcon,
   DownloadIcon,
+  EyeIcon,
   FileTextIcon,
   FolderIcon,
   FolderOpenIcon,
@@ -8,7 +9,13 @@ import {
   ShieldAlertIcon,
   Trash2Icon,
 } from "lucide-react";
-import type { ExplorerDirectoryEntry, ExplorerEntry, ExplorerFileEntry } from "@/api/types";
+import { useEffect, useState } from "react";
+import type {
+  ExplorerDirectoryEntry,
+  ExplorerEntry,
+  ExplorerFileEntry,
+  ObjectVisibility,
+} from "@/api/types";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,8 +28,22 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { useToast } from "@/components/ToastProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatBytes, formatDate } from "@/lib/format";
@@ -37,6 +58,7 @@ export function ExplorerTable({
   onDeleteFolder,
   onOpenDirectory,
   onSignDownload,
+  onUpdateVisibility,
   signingPath,
 }: {
   bucket: string;
@@ -47,6 +69,7 @@ export function ExplorerTable({
   onDeleteFolder: (folderPath: string) => Promise<void>;
   onOpenDirectory: (folderPath: string) => void;
   onSignDownload: (objectKey: string) => Promise<void>;
+  onUpdateVisibility: (objectKey: string, visibility: ObjectVisibility) => Promise<void>;
   signingPath: string;
 }) {
   const { locale, t } = useI18n();
@@ -79,7 +102,7 @@ export function ExplorerTable({
         {entries.map((entry) => (
           <TableRow key={entry.path}>
             <TableCell className="w-[360px] max-w-[360px]">
-              <ExplorerEntryNameButton entry={entry} onOpenDirectory={onOpenDirectory} />
+              <ExplorerEntryName entry={entry} onOpenDirectory={onOpenDirectory} />
             </TableCell>
             <TableCell className="max-w-[280px]">
               <ExplorerEntryUrlCell
@@ -127,6 +150,12 @@ export function ExplorerTable({
                   </>
                 ) : (
                   <>
+                    <FileDetailsButton
+                      buildPublicUrl={buildPublicUrl}
+                      entry={entry}
+                      onUpdateVisibility={onUpdateVisibility}
+                    />
+
                     {entry.visibility === "public" ? (
                       <ExplorerIconLink
                         href={buildPublicUrl(entry.object_key)}
@@ -165,49 +194,42 @@ export function ExplorerTable({
   );
 }
 
-function ExplorerEntryNameButton({
+function ExplorerEntryName({
   entry,
   onOpenDirectory,
 }: {
   entry: ExplorerEntry;
   onOpenDirectory: (folderPath: string) => void;
 }) {
-  let icon: React.ReactNode;
-  let onClick: (() => void) | undefined;
-
-  switch (entry.type) {
-    case "directory":
-      icon = (
+  if (entry.type === "directory") {
+    return (
+      <Button
+        className="w-full max-w-full min-w-0 cursor-pointer justify-start gap-2 px-0 font-normal hover:bg-transparent"
+        onClick={() => onOpenDirectory(entry.path)}
+        type="button"
+        variant="ghost"
+      >
         <span className="inline-flex size-4 items-center justify-center text-amber-500 [&_svg]:size-4">
           <FolderIcon data-icon="inline-start" />
         </span>
-      );
-      onClick = () => onOpenDirectory(entry.path);
-      break;
-    case "file":
-      icon = (
+        <span className="min-w-0 truncate">{entry.name}</span>
+      </Button>
+    );
+  }
+
+  if (entry.type === "file") {
+    return (
+      <div className="flex w-full min-w-0 items-center gap-2 px-0 pl-3">
         <span className="inline-flex size-4 items-center justify-center [&_svg]:size-4">
           <FileTextIcon data-icon="inline-start" />
         </span>
-      );
-      break;
-    default: {
-      const exhaustiveEntry: never = entry;
-      return exhaustiveEntry;
-    }
+        <span className="min-w-0 truncate">{entry.name}</span>
+      </div>
+    );
   }
 
-  return (
-    <Button
-      className="w-full max-w-full min-w-0 justify-start gap-2 px-0 font-normal hover:bg-transparent cursor-pointer"
-      onClick={onClick}
-      type="button"
-      variant="ghost"
-    >
-      {icon}
-      <span className="min-w-0 truncate">{entry.name}</span>
-    </Button>
-  );
+  const exhaustiveEntry: never = entry;
+  return exhaustiveEntry;
 }
 
 function ExplorerEntryUrlCell({
@@ -219,11 +241,27 @@ function ExplorerEntryUrlCell({
   copyLabel: string;
   entry: ExplorerEntry;
 }) {
+  const { t } = useI18n();
+  const { pushToast } = useToast();
+
   if (entry.type !== "file" || entry.visibility !== "public") {
     return <span className="text-muted-foreground">-</span>;
   }
 
   const url = buildPublicUrl(entry.object_key);
+
+  async function handleCopyUrl() {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("clipboard_unavailable");
+      }
+
+      await navigator.clipboard.writeText(url);
+      pushToast("success", t("toast.urlCopied"));
+    } catch {
+      pushToast("error", t("errors.copyUrl"));
+    }
+  }
 
   return (
     <div className="flex min-w-0 items-center gap-1">
@@ -239,13 +277,249 @@ function ExplorerEntryUrlCell({
       <ExplorerIconButton
         label={copyLabel}
         onClick={() => {
-          void navigator.clipboard.writeText(url).catch(() => undefined);
+          void handleCopyUrl();
         }}
       >
         <CopyIcon className="text-sky-500" />
       </ExplorerIconButton>
     </div>
   );
+}
+
+function FileDetailsButton({
+  buildPublicUrl,
+  entry,
+  onUpdateVisibility,
+}: {
+  buildPublicUrl: (objectKey: string) => string;
+  entry: ExplorerFileEntry;
+  onUpdateVisibility: (objectKey: string, visibility: ObjectVisibility) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [selectedVisibility, setSelectedVisibility] = useState<ObjectVisibility>(entry.visibility);
+  const [currentVisibility, setCurrentVisibility] = useState<ObjectVisibility>(entry.visibility);
+  const [isSavingVisibility, setIsSavingVisibility] = useState(false);
+  const { locale, t } = useI18n();
+  const { pushToast } = useToast();
+  const publicUrl =
+    currentVisibility === "public" ? buildPublicUrl(entry.object_key) : "";
+  const previewType = getPreviewType(entry);
+
+  useEffect(() => {
+    setSelectedVisibility(entry.visibility);
+    setCurrentVisibility(entry.visibility);
+  }, [entry.visibility, entry.object_key]);
+
+  async function handleSaveVisibility() {
+    if (selectedVisibility === currentVisibility || isSavingVisibility) {
+      return;
+    }
+
+    setIsSavingVisibility(true);
+    try {
+      await onUpdateVisibility(entry.object_key, selectedVisibility);
+      setCurrentVisibility(selectedVisibility);
+      pushToast("success", t("toast.objectVisibilityUpdated"));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : t("errors.updateObjectVisibility");
+      pushToast("error", message);
+    } finally {
+      setIsSavingVisibility(false);
+    }
+  }
+
+  return (
+    <Dialog onOpenChange={setOpen} open={open}>
+      <ExplorerIconButton
+        label={t("explorer.actions.viewDetails")}
+        onClick={() => setOpen(true)}
+      >
+        <EyeIcon className="text-muted-foreground" />
+      </ExplorerIconButton>
+
+      <DialogContent
+        aria-describedby={undefined}
+        className="max-h-[85vh] sm:max-w-xl"
+      >
+        <DialogHeader>
+          <DialogTitle>{t("explorer.details.title")}</DialogTitle>
+        </DialogHeader>
+
+        <div className="-mr-1 overflow-y-auto pr-1">
+          <dl className="grid gap-3">
+            <DetailField label={t("explorer.details.preview")}>
+              <FilePreview
+                previewType={previewType}
+                publicUrl={publicUrl}
+              />
+            </DetailField>
+            <DetailField label={t("explorer.table.url")} monospace>
+              {publicUrl ? (
+                <a
+                  className="text-sky-600 hover:underline"
+                  href={publicUrl}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  {publicUrl}
+                </a>
+              ) : (
+                t("common.notAvailable")
+              )}
+            </DetailField>
+            <DetailField label={t("explorer.details.originalFilename")} monospace>
+              {entry.original_filename}
+            </DetailField>
+            <DetailField label={t("explorer.details.contentType")} monospace>
+              {entry.content_type}
+            </DetailField>
+            <DetailField label={t("objects.table.size")}>
+              {formatBytes(entry.size)}
+            </DetailField>
+            <DetailField label={t("objects.table.visibility")}>
+              <div className="flex flex-col gap-2">
+                <Badge variant={currentVisibility === "public" ? "secondary" : "outline"}>
+                  {currentVisibility === "public"
+                    ? t("objects.visibility.public")
+                    : t("objects.visibility.private")}
+                </Badge>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <Select
+                    onValueChange={(value) => setSelectedVisibility(value as ObjectVisibility)}
+                    value={selectedVisibility}
+                  >
+                    <SelectTrigger
+                      aria-label={t("objects.form.visibility.label")}
+                      className="w-full sm:w-[160px]"
+                      disabled={isSavingVisibility}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="private">{t("objects.visibility.private")}</SelectItem>
+                      <SelectItem value="public">{t("objects.visibility.public")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    disabled={isSavingVisibility || selectedVisibility === currentVisibility}
+                    onClick={() => {
+                      void handleSaveVisibility();
+                    }}
+                    type="button"
+                    variant="outline"
+                  >
+                    {isSavingVisibility ? (
+                      <LoaderCircleIcon className="animate-spin" data-icon="inline-start" />
+                    ) : null}
+                    {t("common.save")}
+                  </Button>
+                </div>
+              </div>
+            </DetailField>
+            <DetailField label={t("explorer.table.updatedAt")}>
+              {formatDate(entry.updated_at, locale)}
+            </DetailField>
+          </dl>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DetailField({
+  children,
+  label,
+  monospace,
+}: {
+  children: React.ReactNode;
+  label: string;
+  monospace?: boolean;
+}) {
+  return (
+    <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
+      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </dt>
+      <dd className={monospace ? "mt-1 break-all font-mono text-sm" : "mt-1 text-sm"}>
+        {children}
+      </dd>
+    </div>
+  );
+}
+
+type PreviewType = "image" | "video" | "audio" | "pdf" | "text" | null;
+
+function FilePreview({
+  previewType,
+  publicUrl,
+}: {
+  previewType: PreviewType;
+  publicUrl: string;
+}) {
+  const { t } = useI18n();
+
+  if (!publicUrl || !previewType) {
+    return <span className="text-muted-foreground">{t("common.notAvailable")}</span>;
+  }
+
+  if (previewType === "image") {
+    return (
+      <img
+        alt="file preview"
+        className="max-h-80 w-full rounded-md border border-border/70 object-contain"
+        src={publicUrl}
+      />
+    );
+  }
+
+  if (previewType === "video") {
+    return (
+      <video className="max-h-80 w-full rounded-md border border-border/70" controls src={publicUrl} />
+    );
+  }
+
+  if (previewType === "audio") {
+    return <audio className="w-full" controls src={publicUrl} />;
+  }
+
+  return (
+    <iframe
+      className="h-80 w-full rounded-md border border-border/70 bg-background"
+      src={publicUrl}
+      title="file preview"
+    />
+  );
+}
+
+function getPreviewType(entry: ExplorerFileEntry): PreviewType {
+  const contentType = entry.content_type.toLowerCase();
+  const name = entry.original_filename.toLowerCase();
+
+  if (contentType.startsWith("image/")) {
+    return "image";
+  }
+  if (contentType.startsWith("video/")) {
+    return "video";
+  }
+  if (contentType.startsWith("audio/")) {
+    return "audio";
+  }
+  if (contentType === "application/pdf" || name.endsWith(".pdf")) {
+    return "pdf";
+  }
+  if (
+    contentType.startsWith("text/") ||
+    contentType.includes("json") ||
+    contentType.includes("xml") ||
+    contentType.includes("javascript") ||
+    contentType.includes("sql") ||
+    name.endsWith(".md") ||
+    name.endsWith(".log")
+  ) {
+    return "text";
+  }
+
+  return null;
 }
 
 function DeleteFolderButton({

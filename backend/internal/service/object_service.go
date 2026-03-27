@@ -202,6 +202,36 @@ func (s *ObjectService) Delete(ctx context.Context, bucketName string, objectKey
 	return nil
 }
 
+func (s *ObjectService) UpdateVisibility(
+	ctx context.Context,
+	bucketName string,
+	objectKey string,
+	visibilityValue string,
+) (*model.Object, error) {
+	if err := ValidateBucketName(bucketName); err != nil {
+		return nil, err
+	}
+	if err := ValidateObjectKey(objectKey); err != nil {
+		return nil, err
+	}
+
+	visibility, err := ParseVisibility(visibilityValue)
+	if err != nil {
+		return nil, err
+	}
+
+	object, err := s.objectRepo.UpdateVisibility(ctx, bucketName, objectKey, visibility)
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, apperrors.New(http.StatusNotFound, "object_not_found", "object not found")
+		}
+
+		return nil, apperrors.Wrap(http.StatusInternalServerError, "object_update_failed", "failed to update object visibility", err)
+	}
+
+	return object, nil
+}
+
 func encodeCursor(createdAt time.Time, id uint64) string {
 	raw := fmt.Sprintf("%d|%d", createdAt.UTC().UnixNano(), id)
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))

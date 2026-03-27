@@ -170,3 +170,25 @@ func (r *ObjectRepository) SoftDelete(ctx context.Context, bucketName string, ob
 		})
 	return result.RowsAffected > 0, result.Error
 }
+
+func (r *ObjectRepository) UpdateVisibility(
+	ctx context.Context,
+	bucketName string,
+	objectKey string,
+	visibility model.Visibility,
+) (*model.Object, error) {
+	result := r.db.WithContext(ctx).Model(&model.Object{}).
+		Where("bucket_name = ? AND object_key = ? AND is_deleted = ?", bucketName, objectKey, false).
+		Updates(map[string]any{
+			"visibility": visibility,
+			"updated_at": time.Now().UTC(),
+		})
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+
+	return r.FindActive(ctx, bucketName, objectKey)
+}

@@ -38,6 +38,12 @@ export interface CreateFolderParams {
   name: string;
 }
 
+export interface UpdateObjectVisibilityParams {
+  bucket: string;
+  objectKey: string;
+  visibility: ObjectVisibility;
+}
+
 export function listObjects(settings: AppSettings, params: ListObjectsParams) {
   return apiRequest<ObjectListResult>(settings, {
     method: "GET",
@@ -138,6 +144,21 @@ export function deleteObject(
   });
 }
 
+export function updateObjectVisibility(
+  settings: AppSettings,
+  params: UpdateObjectVisibilityParams,
+) {
+  return apiRequest<ObjectItem>(settings, {
+    method: "PATCH",
+    url: `/api/v1/buckets/${encodeURIComponent(params.bucket)}/objects/visibility/${encodeObjectKey(
+      params.objectKey,
+    )}`,
+    data: {
+      visibility: params.visibility,
+    },
+  });
+}
+
 export function createSignedDownloadURL(
   settings: AppSettings,
   bucket: string,
@@ -169,10 +190,15 @@ export function buildPublicObjectURL(
 function encodeObjectKey(objectKey: string) {
   return objectKey
     .split("/")
-    .map((segment) => encodeURIComponent(segment))
+    .map(encodeObjectKeySegment)
     .join("/");
 }
 
 function encodeHeaderFilename(filename: string) {
   return encodeURIComponent(filename);
+}
+
+function encodeObjectKeySegment(segment: string) {
+  // Keep dots percent-encoded so upstream proxies do not treat object keys as file extensions.
+  return encodeURIComponent(segment).replace(/\./g, "%2E");
 }

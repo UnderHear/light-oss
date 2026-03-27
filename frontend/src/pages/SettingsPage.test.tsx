@@ -26,11 +26,12 @@ describe("SettingsPage", () => {
 
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("radio", { name: "中文" }));
+    await userEvent.click(screen.getByRole("button", { name: "Change language" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "简体中文" }));
 
     expect(await screen.findByRole("heading", { name: "设置" })).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("radio", { name: "深色" }));
+    await userEvent.click(screen.getByRole("button", { name: "切换主题" }));
 
     await waitFor(() => {
       expect(document.documentElement.classList.contains("dark")).toBe(true);

@@ -11,6 +11,7 @@ vi.mock("../api/objects", () => ({
   uploadObject: vi.fn(),
   deleteObject: vi.fn(),
   deleteFolder: vi.fn(),
+  updateObjectVisibility: vi.fn(),
   createSignedDownloadURL: vi.fn(),
   buildPublicObjectURL: vi.fn(() => "http://localhost:8080/download"),
 }));
@@ -19,12 +20,35 @@ import {
   createFolder,
   deleteObject,
   listExplorerEntries,
+  updateObjectVisibility,
   uploadObject,
 } from "../api/objects";
 
 describe("BucketObjectsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(Element.prototype, "hasPointerCapture", {
+      configurable: true,
+      value: vi.fn(() => false),
+    });
+    Object.defineProperty(Element.prototype, "setPointerCapture", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(Element.prototype, "releasePointerCapture", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    });
   });
 
   it("navigates into a directory from the table", async () => {
@@ -231,5 +255,161 @@ describe("BucketObjectsPage", () => {
         "docs/readme.txt",
       );
     });
+  });
+
+  it("shows a success toast after copying a public URL", async () => {
+    vi.mocked(listExplorerEntries).mockResolvedValue({
+      items: [
+        {
+          type: "file",
+          path: "docs/readme.txt",
+          name: "readme.txt",
+          is_empty: null,
+          object_key: "docs/readme.txt",
+          original_filename: "readme.txt",
+          size: 12,
+          content_type: "text/plain",
+          etag: "abcdef1234567890",
+          visibility: "public",
+          updated_at: "2026-03-25T00:00:00Z",
+        },
+      ],
+      next_cursor: "",
+    });
+
+    renderWithApp(
+      <Routes>
+        <Route path="/buckets/:bucket" element={<BucketObjectsPage />} />
+      </Routes>,
+      { route: "/buckets/demo" },
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "Copy URL" }));
+
+    await waitFor(() => {
+      expect(window.navigator.clipboard.writeText).toHaveBeenCalledWith(
+        "http://localhost:8080/download",
+      );
+    });
+
+    expect(await screen.findByText("URL copied")).toBeInTheDocument();
+  });
+
+  it("opens a file details dialog from the actions column", async () => {
+    vi.mocked(listExplorerEntries).mockResolvedValue({
+      items: [
+        {
+          type: "file",
+          path: "images/avatar.png",
+          name: "avatar.png",
+          is_empty: null,
+          object_key: "images/avatar.png",
+          original_filename: "avatar.png",
+          size: 4096,
+          content_type: "image/png",
+          etag: "abc123",
+          visibility: "public",
+          updated_at: "2026-03-25T00:00:00Z",
+        },
+      ],
+      next_cursor: "",
+    });
+
+    renderWithApp(
+      <Routes>
+        <Route path="/buckets/:bucket" element={<BucketObjectsPage />} />
+      </Routes>,
+      { route: "/buckets/demo" },
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "View details" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("File details")).toBeInTheDocument();
+    expect(within(dialog).getByText("avatar.png")).toBeInTheDocument();
+    expect(within(dialog).getByText("image/png")).toBeInTheDocument();
+    expect(within(dialog).getByAltText("file preview")).toHaveAttribute(
+      "src",
+      "http://localhost:8080/download",
+    );
+  });
+
+  it("updates visibility from file details and refreshes entries", async () => {
+    vi.mocked(listExplorerEntries)
+      .mockResolvedValueOnce({
+        items: [
+          {
+            type: "file",
+            path: "docs/readme.txt",
+            name: "readme.txt",
+            is_empty: null,
+            object_key: "docs/readme.txt",
+            original_filename: "readme.txt",
+            size: 12,
+            content_type: "text/plain",
+            etag: "abcdef1234567890",
+            visibility: "private",
+            updated_at: "2026-03-25T00:00:00Z",
+          },
+        ],
+        next_cursor: "",
+      })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            type: "file",
+            path: "docs/readme.txt",
+            name: "readme.txt",
+            is_empty: null,
+            object_key: "docs/readme.txt",
+            original_filename: "readme.txt",
+            size: 12,
+            content_type: "text/plain",
+            etag: "abcdef1234567890",
+            visibility: "public",
+            updated_at: "2026-03-25T00:00:00Z",
+          },
+        ],
+        next_cursor: "",
+      });
+
+    vi.mocked(updateObjectVisibility).mockResolvedValue({
+      id: 1,
+      bucket_name: "demo",
+      object_key: "docs/readme.txt",
+      original_filename: "readme.txt",
+      size: 12,
+      content_type: "text/plain",
+      etag: "abcdef1234567890",
+      visibility: "public",
+      created_at: "2026-03-25T00:00:00Z",
+      updated_at: "2026-03-25T00:00:00Z",
+    });
+
+    renderWithApp(
+      <Routes>
+        <Route path="/buckets/:bucket" element={<BucketObjectsPage />} />
+      </Routes>,
+      { route: "/buckets/demo" },
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "View details" }));
+
+    await userEvent.click(await screen.findByRole("combobox", { name: "Visibility" }));
+    await userEvent.click(await screen.findByRole("option", { name: "Public" }));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(updateObjectVisibility).toHaveBeenCalledWith(
+        { apiBaseUrl: "http://localhost:8080", bearerToken: "dev-token" },
+        {
+          bucket: "demo",
+          objectKey: "docs/readme.txt",
+          visibility: "public",
+        },
+      );
+    });
+
+    expect(await screen.findByText("Object visibility updated")).toBeInTheDocument();
   });
 });

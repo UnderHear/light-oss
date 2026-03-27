@@ -53,6 +53,10 @@ type createFolderRequest struct {
 	Name   string `json:"name"`
 }
 
+type updateObjectVisibilityRequest struct {
+	Visibility string `json:"visibility"`
+}
+
 type signDownloadRequest struct {
 	Bucket           string `json:"bucket"`
 	ObjectKey        string `json:"object_key"`
@@ -122,7 +126,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	router.Use(rateLimiter.Middleware())
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     deps.Config.CORSAllowedOrigins,
-		AllowMethods:     []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
+		AllowMethods:     []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
 		AllowHeaders:     []string{"Authorization", "Content-Type", "X-Object-Visibility", "X-Original-Filename", "X-Request-ID"},
 		ExposeHeaders:    []string{"Content-Length", "Content-Type", "ETag", "X-Request-ID", "X-Object-Visibility", "X-Original-Filename"},
 		AllowCredentials: false,
@@ -144,6 +148,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	protected.DELETE("/buckets/:bucket/folders", handler.deleteFolder)
 	protected.GET("/buckets/:bucket/entries", handler.listExplorerEntries)
 	protected.PUT("/buckets/:bucket/objects/*key", middleware.MaxBodySize(deps.Config.MaxUploadSizeBytes), handler.uploadObject)
+	protected.PATCH("/buckets/:bucket/objects/visibility/*key", handler.updateObjectVisibility)
 	protected.GET("/buckets/:bucket/objects", handler.listObjects)
 	protected.DELETE("/buckets/:bucket/objects/*key", handler.deleteObject)
 	protected.POST("/sign/download", handler.signDownload)
@@ -316,6 +321,27 @@ func (h *apiHandler) listObjects(c *gin.Context) {
 		"items":       items,
 		"next_cursor": result.NextCursor,
 	})
+}
+
+func (h *apiHandler) updateObjectVisibility(c *gin.Context) {
+	var req updateObjectVisibilityRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, apperrors.New(http.StatusBadRequest, "invalid_request", "request body is invalid"))
+		return
+	}
+
+	object, err := h.objectService.UpdateVisibility(
+		c.Request.Context(),
+		c.Param("bucket"),
+		normalizeObjectKey(c.Param("key")),
+		req.Visibility,
+	)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	response.JSON(c, http.StatusOK, objectToResponse(*object))
 }
 
 func (h *apiHandler) deleteObject(c *gin.Context) {

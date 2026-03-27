@@ -139,14 +139,12 @@ export function ExplorerTable({
                       <FolderOpenIcon className="text-amber-500" />
                     </ExplorerIconButton>
 
-                    {entry.is_empty ? (
-                      <DeleteFolderButton
-                        bucket={bucket}
-                        deletingPath={deletingPath}
-                        entry={entry}
-                        onDeleteFolder={onDeleteFolder}
-                      />
-                    ) : null}
+                    <DeleteFolderButton
+                      bucket={bucket}
+                      deletingPath={deletingPath}
+                      entry={entry}
+                      onDeleteFolder={onDeleteFolder}
+                    />
                   </>
                 ) : (
                   <>

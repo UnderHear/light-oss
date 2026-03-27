@@ -18,6 +18,7 @@ vi.mock("../api/objects", () => ({
 
 import {
   createFolder,
+  deleteFolder,
   deleteObject,
   listExplorerEntries,
   updateObjectVisibility,
@@ -253,6 +254,56 @@ describe("BucketObjectsPage", () => {
         { apiBaseUrl: "http://localhost:8080", bearerToken: "dev-token" },
         "demo",
         "docs/readme.txt",
+      );
+    });
+  });
+
+  it("supports recursive folder deletion from the table", async () => {
+    vi.mocked(listExplorerEntries).mockResolvedValue({
+      items: [
+        {
+          type: "directory",
+          path: "docs/",
+          name: "docs",
+          is_empty: false,
+          object_key: null,
+          original_filename: null,
+          size: null,
+          content_type: null,
+          etag: null,
+          visibility: null,
+          updated_at: null,
+        },
+      ],
+      next_cursor: "",
+    });
+    vi.mocked(deleteFolder).mockResolvedValue(undefined);
+
+    renderWithApp(
+      <Routes>
+        <Route path="/buckets/:bucket" element={<BucketObjectsPage />} />
+      </Routes>,
+      { route: "/buckets/demo" },
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: "Delete folder" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText("Delete folder?")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        "This removes the folder docs from demo together with all nested files and folders.",
+      ),
+    ).toBeInTheDocument();
+
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => {
+      expect(deleteFolder).toHaveBeenCalledWith(
+        { apiBaseUrl: "http://localhost:8080", bearerToken: "dev-token" },
+        "demo",
+        "docs/",
+        { recursive: true },
       );
     });
   });

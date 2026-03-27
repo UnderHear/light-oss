@@ -244,7 +244,13 @@ func (h *apiHandler) createFolder(c *gin.Context) {
 }
 
 func (h *apiHandler) deleteFolder(c *gin.Context) {
-	if err := h.objectService.DeleteFolder(c.Request.Context(), c.Param("bucket"), c.Query("path")); err != nil {
+	recursive, err := parseOptionalBoolQuery(c.Query("recursive"))
+	if err != nil {
+		response.Error(c, apperrors.New(http.StatusBadRequest, "invalid_request", "recursive query is invalid"))
+		return
+	}
+
+	if err := h.objectService.DeleteFolder(c.Request.Context(), c.Param("bucket"), c.Query("path"), recursive); err != nil {
 		response.Error(c, err)
 		return
 	}
@@ -492,6 +498,14 @@ func explorerEntryToResponse(entry service.ExplorerEntry) explorerEntryResponse 
 
 func normalizeObjectKey(raw string) string {
 	return strings.TrimPrefix(raw, "/")
+}
+
+func parseOptionalBoolQuery(raw string) (bool, error) {
+	if strings.TrimSpace(raw) == "" {
+		return false, nil
+	}
+
+	return strconv.ParseBool(raw)
 }
 
 func setObjectHeaders(c *gin.Context, object *model.Object) {

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSettings } from "../lib/settings";
-import { buildPublicObjectURL, updateObjectVisibility, uploadObject } from "./objects";
+import { buildPublicObjectURL, deleteFolder, updateObjectVisibility, uploadObject } from "./objects";
 
 const request = vi.fn();
 const apiRequestMock = vi.fn();
@@ -78,6 +78,22 @@ describe("objects api helpers", () => {
         method: "PATCH",
         url: "/api/v1/buckets/demo/objects/visibility/docs/underhear%2Epostgresql%2Esql",
         data: { visibility: "public" },
+      }),
+    );
+  });
+
+  it("passes recursive deletion to the folder endpoint when requested", async () => {
+    await deleteFolder(settings, "demo", "docs/", { recursive: true });
+
+    expect(apiRequestMock).toHaveBeenCalledWith(
+      settings,
+      expect.objectContaining({
+        method: "DELETE",
+        url: "/api/v1/buckets/demo/folders",
+        params: {
+          path: "docs/",
+          recursive: true,
+        },
       }),
     );
   });

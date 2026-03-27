@@ -176,7 +176,7 @@ export function BucketObjectsPage() {
   const deleteFolderMutation = useMutation({
     mutationFn: async (folderPath: string) => {
       setDeletingPath(folderPath);
-      await deleteFolder(settings, bucket, folderPath);
+      await deleteFolder(settings, bucket, folderPath, { recursive: true });
     },
     onSuccess: async () => {
       pushToast("success", t("toast.folderDeleted"));

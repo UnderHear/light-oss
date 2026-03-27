@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -78,7 +79,7 @@ func (r *ObjectRepository) ListActive(ctx context.Context, params ListObjectsPar
 		Where("bucket_name = ? AND is_deleted = ?", params.BucketName, false)
 
 	if params.Prefix != "" {
-		query = query.Where("object_key LIKE ?", params.Prefix+"%")
+		query = query.Where(`object_key LIKE ? ESCAPE '\'`, likePrefixPattern(params.Prefix))
 	}
 	if params.Cursor != nil {
 		query = query.Where(
@@ -104,7 +105,7 @@ func (r *ObjectRepository) ListActiveByPrefixOrdered(ctx context.Context, bucket
 		Where("bucket_name = ? AND is_deleted = ?", bucketName, false)
 
 	if prefix != "" {
-		query = query.Where("object_key LIKE ?", prefix+"%")
+		query = query.Where(`object_key LIKE ? ESCAPE '\'`, likePrefixPattern(prefix))
 	}
 
 	err := query.
@@ -132,7 +133,7 @@ func (r *ObjectRepository) ExistsActiveWithPrefix(ctx context.Context, bucketNam
 		Where("bucket_name = ? AND is_deleted = ?", bucketName, false)
 
 	if prefix != "" {
-		query = query.Where("object_key LIKE ?", prefix+"%")
+		query = query.Where(`object_key LIKE ? ESCAPE '\'`, likePrefixPattern(prefix))
 	}
 
 	if err := query.Count(&count).Error; err != nil {
@@ -148,7 +149,7 @@ func (r *ObjectRepository) ExistsActiveWithPrefixExceptKey(ctx context.Context, 
 	query := r.db.WithContext(ctx).
 		Model(&model.Object{}).
 		Where("bucket_name = ? AND is_deleted = ?", bucketName, false).
-		Where("object_key LIKE ?", prefix+"%")
+		Where(`object_key LIKE ? ESCAPE '\'`, likePrefixPattern(prefix))
 
 	if excludedKey != "" {
 		query = query.Where("object_key <> ?", excludedKey)
@@ -169,6 +170,30 @@ func (r *ObjectRepository) SoftDelete(ctx context.Context, bucketName string, ob
 			"updated_at": time.Now().UTC(),
 		})
 	return result.RowsAffected > 0, result.Error
+}
+
+func (r *ObjectRepository) SoftDeleteByPrefix(ctx context.Context, bucketName string, prefix string) (int64, error) {
+	result := r.db.WithContext(ctx).Model(&model.Object{}).
+		Where("bucket_name = ? AND is_deleted = ?", bucketName, false).
+		Where(`object_key LIKE ? ESCAPE '\'`, likePrefixPattern(prefix)).
+		Updates(map[string]any{
+			"is_deleted": true,
+			"updated_at": time.Now().UTC(),
+		})
+	return result.RowsAffected, result.Error
+}
+
+func likePrefixPattern(prefix string) string {
+	return escapeLikeValue(prefix) + "%"
+}
+
+func escapeLikeValue(value string) string {
+	replacer := strings.NewReplacer(
+		"\\", "\\\\",
+		"%", "\\%",
+		"_", "\\_",
+	)
+	return replacer.Replace(value)
 }
 
 func (r *ObjectRepository) UpdateVisibility(

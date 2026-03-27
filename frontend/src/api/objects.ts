@@ -38,6 +38,10 @@ export interface CreateFolderParams {
   name: string;
 }
 
+export interface DeleteFolderOptions {
+  recursive?: boolean;
+}
+
 export interface UpdateObjectVisibilityParams {
   bucket: string;
   objectKey: string;
@@ -87,12 +91,14 @@ export function deleteFolder(
   settings: AppSettings,
   bucket: string,
   folderPath: string,
+  options?: DeleteFolderOptions,
 ) {
   return apiRequest<void>(settings, {
     method: "DELETE",
     url: `/api/v1/buckets/${encodeURIComponent(bucket)}/folders`,
     params: {
       path: folderPath,
+      recursive: options?.recursive ? true : undefined,
     },
   });
 }

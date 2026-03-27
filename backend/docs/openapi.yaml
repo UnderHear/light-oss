@@ -102,7 +102,7 @@ paths:
         '201':
           description: Folder created
     delete:
-      summary: Delete empty folder
+      summary: Delete folder
       security:
         - bearerAuth: []
       parameters:
@@ -116,6 +116,11 @@ paths:
           required: true
           schema:
             type: string
+        - in: query
+          name: recursive
+          schema:
+            type: boolean
+          description: When true, delete the folder and all nested files and subfolders. When omitted or false, only empty folders can be deleted.
       responses:
         '204':
           description: Folder deleted

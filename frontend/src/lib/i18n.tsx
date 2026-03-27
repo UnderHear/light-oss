@@ -172,7 +172,7 @@ const enUS = {
   "explorer.createFolder.submitting": "Creating...",
   "explorer.deleteFolder.title": "Delete folder?",
   "explorer.deleteFolder.description":
-    "This removes the empty folder {name} from {bucket}.",
+    "This removes the folder {name} from {bucket} together with all nested files and folders.",
   "explorer.empty.title": "This folder is empty",
   "explorer.empty.description":
     "Upload a file or create a folder to populate this location.",
@@ -384,7 +384,7 @@ const zhCN: Record<keyof typeof enUS, string> = {
   "explorer.createFolder.submitting": "创建中...",
   "explorer.deleteFolder.title": "删除目录？",
   "explorer.deleteFolder.description":
-    "这会从 {bucket} 中移除空目录 {name}。",
+    "这会删除 {bucket} 中的目录 {name}，以及其中所有文件和子目录。",
   "explorer.empty.title": "这个目录是空的",
   "explorer.empty.description": "上传文件或创建子目录来填充当前目录。",
   "explorer.limit.option": "每页 {count} 条",

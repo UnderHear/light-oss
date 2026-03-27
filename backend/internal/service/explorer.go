@@ -261,7 +261,7 @@ func (s *ObjectService) CreateFolder(ctx context.Context, input CreateFolderInpu
 	}, nil
 }
 
-func (s *ObjectService) DeleteFolder(ctx context.Context, bucketName string, folderPath string) error {
+func (s *ObjectService) DeleteFolder(ctx context.Context, bucketName string, folderPath string, recursive bool) error {
 	if err := ValidateBucketName(bucketName); err != nil {
 		return err
 	}
@@ -275,6 +275,18 @@ func (s *ObjectService) DeleteFolder(ctx context.Context, bucketName string, fol
 	}
 	if !exists {
 		return apperrors.New(404, "folder_not_found", "folder not found")
+	}
+
+	if recursive {
+		deleted, err := s.objectRepo.SoftDeleteByPrefix(ctx, bucketName, folderPath)
+		if err != nil {
+			return apperrors.Wrap(500, "folder_delete_failed", "failed to delete folder", err)
+		}
+		if deleted == 0 {
+			return apperrors.New(404, "folder_not_found", "folder not found")
+		}
+
+		return nil
 	}
 
 	markerKey := folderPath + folderMarkerFilename

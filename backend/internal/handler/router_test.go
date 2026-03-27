@@ -378,6 +378,7 @@ func TestCreateAndDeleteFolder(t *testing.T) {
 	}
 
 	uploadObject(t, router, "/api/v1/buckets/folder-bucket/objects/docs/readme.txt", "hello", "public")
+	uploadObject(t, router, "/api/v1/buckets/folder-bucket/objects/docs/nested/guide.txt", "nested", "private")
 
 	deleteNonEmptyReq := httptest.NewRequest(http.MethodDelete, "/api/v1/buckets/folder-bucket/folders?path="+url.QueryEscape("docs/"), nil)
 	deleteNonEmptyReq.Header.Set("Authorization", "Bearer dev-token")
@@ -385,6 +386,108 @@ func TestCreateAndDeleteFolder(t *testing.T) {
 	router.ServeHTTP(deleteNonEmptyRec, deleteNonEmptyReq)
 	if deleteNonEmptyRec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d, body=%s", deleteNonEmptyRec.Code, deleteNonEmptyRec.Body.String())
+	}
+
+	deleteRecursiveReq := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v1/buckets/folder-bucket/folders?path="+url.QueryEscape("docs/")+"&recursive=true",
+		nil,
+	)
+	deleteRecursiveReq.Header.Set("Authorization", "Bearer dev-token")
+	deleteRecursiveRec := httptest.NewRecorder()
+	router.ServeHTTP(deleteRecursiveRec, deleteRecursiveReq)
+	if deleteRecursiveRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d, body=%s", deleteRecursiveRec.Code, deleteRecursiveRec.Body.String())
+	}
+
+	listEntriesReq := httptest.NewRequest(http.MethodGet, "/api/v1/buckets/folder-bucket/entries", nil)
+	listEntriesReq.Header.Set("Authorization", "Bearer dev-token")
+	listEntriesRec := httptest.NewRecorder()
+	router.ServeHTTP(listEntriesRec, listEntriesReq)
+	if listEntriesRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", listEntriesRec.Code, listEntriesRec.Body.String())
+	}
+
+	var listEntriesBody apiEnvelope[explorerListResponse]
+	decodeJSON(t, listEntriesRec.Body.Bytes(), &listEntriesBody)
+	if len(listEntriesBody.Data.Items) != 0 {
+		t.Fatalf("expected empty root after recursive delete, got %+v", listEntriesBody.Data.Items)
+	}
+
+	deleteMissingReq := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v1/buckets/folder-bucket/folders?path="+url.QueryEscape("missing/")+"&recursive=true",
+		nil,
+	)
+	deleteMissingReq.Header.Set("Authorization", "Bearer dev-token")
+	deleteMissingRec := httptest.NewRecorder()
+	router.ServeHTTP(deleteMissingRec, deleteMissingReq)
+	if deleteMissingRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d, body=%s", deleteMissingRec.Code, deleteMissingRec.Body.String())
+	}
+}
+
+func TestRecursiveDeleteEscapesLikeWildcards(t *testing.T) {
+	router := newTestRouter(t, 1024)
+
+	createBucket(t, router, "wildcard-bucket")
+	uploadObject(t, router, "/api/v1/buckets/wildcard-bucket/objects/a_/keep.txt", "keep", "public")
+	uploadObject(t, router, "/api/v1/buckets/wildcard-bucket/objects/ab/stay.txt", "stay", "public")
+	uploadObject(t, router, "/api/v1/buckets/wildcard-bucket/objects/ghosts/readme.txt", "ghost", "public")
+
+	deleteUnderscoreReq := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v1/buckets/wildcard-bucket/folders?path="+url.QueryEscape("a_/")+"&recursive=true",
+		nil,
+	)
+	deleteUnderscoreReq.Header.Set("Authorization", "Bearer dev-token")
+	deleteUnderscoreRec := httptest.NewRecorder()
+	router.ServeHTTP(deleteUnderscoreRec, deleteUnderscoreReq)
+	if deleteUnderscoreRec.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d, body=%s", deleteUnderscoreRec.Code, deleteUnderscoreRec.Body.String())
+	}
+
+	rootEntriesReq := httptest.NewRequest(http.MethodGet, "/api/v1/buckets/wildcard-bucket/entries", nil)
+	rootEntriesReq.Header.Set("Authorization", "Bearer dev-token")
+	rootEntriesRec := httptest.NewRecorder()
+	router.ServeHTTP(rootEntriesRec, rootEntriesReq)
+	if rootEntriesRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", rootEntriesRec.Code, rootEntriesRec.Body.String())
+	}
+
+	var rootEntriesBody apiEnvelope[explorerListResponse]
+	decodeJSON(t, rootEntriesRec.Body.Bytes(), &rootEntriesBody)
+	if len(rootEntriesBody.Data.Items) != 2 {
+		t.Fatalf("expected 2 remaining root directories, got %+v", rootEntriesBody.Data.Items)
+	}
+	if rootEntriesBody.Data.Items[0].Path != "ab/" || rootEntriesBody.Data.Items[1].Path != "ghosts/" {
+		t.Fatalf("unexpected remaining directories after underscore delete: %+v", rootEntriesBody.Data.Items)
+	}
+
+	deleteMissingWildcardReq := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v1/buckets/wildcard-bucket/folders?path="+url.QueryEscape("ghost%/")+"&recursive=true",
+		nil,
+	)
+	deleteMissingWildcardReq.Header.Set("Authorization", "Bearer dev-token")
+	deleteMissingWildcardRec := httptest.NewRecorder()
+	router.ServeHTTP(deleteMissingWildcardRec, deleteMissingWildcardReq)
+	if deleteMissingWildcardRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d, body=%s", deleteMissingWildcardRec.Code, deleteMissingWildcardRec.Body.String())
+	}
+
+	ghostEntriesReq := httptest.NewRequest(http.MethodGet, "/api/v1/buckets/wildcard-bucket/entries?prefix="+url.QueryEscape("ghosts/"), nil)
+	ghostEntriesReq.Header.Set("Authorization", "Bearer dev-token")
+	ghostEntriesRec := httptest.NewRecorder()
+	router.ServeHTTP(ghostEntriesRec, ghostEntriesReq)
+	if ghostEntriesRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", ghostEntriesRec.Code, ghostEntriesRec.Body.String())
+	}
+
+	var ghostEntriesBody apiEnvelope[explorerListResponse]
+	decodeJSON(t, ghostEntriesRec.Body.Bytes(), &ghostEntriesBody)
+	if len(ghostEntriesBody.Data.Items) != 1 || ghostEntriesBody.Data.Items[0].Path != "ghosts/readme.txt" {
+		t.Fatalf("expected ghosts/readme.txt to remain after missing wildcard delete, got %+v", ghostEntriesBody.Data.Items)
 	}
 }
 

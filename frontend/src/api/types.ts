@@ -75,6 +75,11 @@ export interface ExplorerEntriesResult {
   next_cursor: string;
 }
 
+export interface BatchUploadResult {
+  uploaded_count: number;
+  items: ObjectItem[];
+}
+
 export interface SignedDownloadResult {
   url: string;
   expires_at: number;

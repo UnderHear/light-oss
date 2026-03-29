@@ -29,46 +29,55 @@ import {
 } from "@/components/ui/select";
 import { useI18n } from "@/lib/i18n";
 
-export interface UploadDialogValue {
-  objectKey: string;
-  file: File;
+const folderInputAttributes: Record<string, string> = {
+  directory: "",
+  webkitdirectory: "",
+};
+
+export interface UploadFolderDialogValue {
+  files: File[];
   visibility: ObjectVisibility;
 }
 
-export function UploadObjectDialog({
+export function UploadFolderDialog({
   currentPrefix,
   onSubmit,
   pending,
   progress,
 }: {
   currentPrefix: string;
-  onSubmit: (value: UploadDialogValue) => Promise<void>;
+  onSubmit: (value: UploadFolderDialogValue) => Promise<void>;
   pending: boolean;
   progress: number;
 }) {
   const [open, setOpen] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [objectKey, setObjectKey] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [visibility, setVisibility] = useState<ObjectVisibility>("private");
   const { t } = useI18n();
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedFile) {
+    if (selectedFiles.length === 0) {
       return;
     }
 
+    const form = event.currentTarget;
     try {
       await onSubmit({
-        objectKey: objectKey.trim() || selectedFile.name,
-        file: selectedFile,
+        files: selectedFiles,
         visibility,
       });
 
-      setSelectedFile(null);
-      setObjectKey("");
+      setSelectedFiles([]);
       setVisibility("private");
       setOpen(false);
+
+      const input = form.elements.namedItem(
+        "upload-folder",
+      ) as HTMLInputElement | null;
+      if (input) {
+        input.value = "";
+      }
     } catch {
       return;
     }
@@ -77,16 +86,16 @@ export function UploadObjectDialog({
   return (
     <Dialog onOpenChange={setOpen} open={open}>
       <DialogTrigger asChild>
-        <Button disabled={pending} type="button">
+        <Button disabled={pending} type="button" variant="outline">
           <UploadIcon data-icon="inline-start" />
-          {t("explorer.toolbar.upload")}
+          {t("explorer.toolbar.uploadFolder")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("explorer.upload.title")}</DialogTitle>
+          <DialogTitle>{t("explorer.folderUpload.title")}</DialogTitle>
           <DialogDescription>
-            {t("explorer.upload.description")}
+            {t("explorer.folderUpload.description")}
           </DialogDescription>
         </DialogHeader>
         <form className="flex flex-col gap-5" onSubmit={handleSubmit}>
@@ -99,36 +108,22 @@ export function UploadObjectDialog({
             </Field>
 
             <Field data-disabled={pending || undefined}>
-              <FieldLabel htmlFor="upload-file">
-                {t("objects.form.file.label")}
+              <FieldLabel htmlFor="upload-folder">
+                {t("explorer.folderUpload.folderLabel")}
               </FieldLabel>
               <Input
+                {...folderInputAttributes}
                 disabled={pending}
-                id="upload-file"
-                name="upload-file"
+                id="upload-folder"
+                multiple
+                name="upload-folder"
                 onChange={(event) =>
-                  setSelectedFile(event.target.files?.[0] ?? null)
+                  setSelectedFiles(Array.from(event.target.files ?? []))
                 }
                 type="file"
               />
               <FieldDescription>
-                {t("objects.form.file.description")}
-              </FieldDescription>
-            </Field>
-
-            <Field data-disabled={pending || undefined}>
-              <FieldLabel htmlFor="upload-object-key">
-                {t("explorer.upload.objectNameLabel")}
-              </FieldLabel>
-              <Input
-                disabled={pending}
-                id="upload-object-key"
-                onChange={(event) => setObjectKey(event.target.value)}
-                placeholder={t("explorer.upload.objectNamePlaceholder")}
-                value={objectKey}
-              />
-              <FieldDescription>
-                {t("objects.form.objectKey.description")}
+                {t("explorer.folderUpload.folderDescription")}
               </FieldDescription>
             </Field>
 
@@ -175,7 +170,10 @@ export function UploadObjectDialog({
           ) : null}
 
           <DialogFooter>
-            <Button disabled={pending || !selectedFile} type="submit">
+            <Button
+              disabled={pending || selectedFiles.length === 0}
+              type="submit"
+            >
               {pending ? (
                 <LoaderCircleIcon
                   className="animate-spin"
@@ -186,7 +184,7 @@ export function UploadObjectDialog({
               )}
               {pending
                 ? t("objects.form.submitting")
-                : t("explorer.upload.submit")}
+                : t("explorer.folderUpload.submit")}
             </Button>
           </DialogFooter>
         </form>

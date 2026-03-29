@@ -9,11 +9,7 @@ import {
   RefreshCcwIcon,
   SearchIcon,
 } from "lucide-react";
-import {
-  useNavigate,
-  useParams,
-  useSearchParams,
-} from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   buildPublicObjectURL,
   createFolder,
@@ -21,6 +17,7 @@ import {
   deleteFolder,
   deleteObject,
   listExplorerEntries,
+  uploadFolder,
   updateObjectVisibility,
   uploadObject,
 } from "@/api/objects";
@@ -50,7 +47,14 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/components/ToastProvider";
 import { CreateFolderDialog } from "@/features/explorer/CreateFolderDialog";
 import { ExplorerTable } from "@/features/explorer/ExplorerTable";
-import { UploadObjectDialog, type UploadDialogValue } from "@/features/explorer/UploadObjectDialog";
+import {
+  UploadFolderDialog,
+  type UploadFolderDialogValue,
+} from "@/features/explorer/UploadFolderDialog";
+import {
+  UploadObjectDialog,
+  type UploadDialogValue,
+} from "@/features/explorer/UploadObjectDialog";
 import {
   explorerPageSizes,
   getExplorerBreadcrumbs,
@@ -131,7 +135,30 @@ export function BucketObjectsPage() {
     },
     onError: (error) => {
       setUploadProgress(0);
-      const message = error instanceof Error ? error.message : t("errors.uploadObject");
+      const message =
+        error instanceof Error ? error.message : t("errors.uploadObject");
+      pushToast("error", message);
+    },
+  });
+
+  const uploadFolderMutation = useMutation({
+    mutationFn: (value: UploadFolderDialogValue) =>
+      uploadFolder(settings, {
+        bucket,
+        prefix,
+        files: value.files,
+        visibility: value.visibility,
+        onProgress: setUploadProgress,
+      }),
+    onSuccess: async () => {
+      setUploadProgress(0);
+      pushToast("success", t("toast.folderUploaded"));
+      await queryClient.invalidateQueries({ queryKey: entriesBaseQueryKey });
+    },
+    onError: (error) => {
+      setUploadProgress(0);
+      const message =
+        error instanceof Error ? error.message : t("errors.uploadFolder");
       pushToast("error", message);
     },
   });
@@ -148,7 +175,8 @@ export function BucketObjectsPage() {
       await queryClient.invalidateQueries({ queryKey: entriesBaseQueryKey });
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : t("errors.createFolder");
+      const message =
+        error instanceof Error ? error.message : t("errors.createFolder");
       pushToast("error", message);
     },
   });
@@ -165,7 +193,8 @@ export function BucketObjectsPage() {
       });
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : t("errors.deleteObject");
+      const message =
+        error instanceof Error ? error.message : t("errors.deleteObject");
       pushToast("error", message);
     },
     onSettled: () => {
@@ -183,7 +212,8 @@ export function BucketObjectsPage() {
       await queryClient.invalidateQueries({ queryKey: entriesBaseQueryKey });
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : t("errors.deleteFolder");
+      const message =
+        error instanceof Error ? error.message : t("errors.deleteFolder");
       pushToast("error", message);
     },
     onSettled: () => {
@@ -201,7 +231,8 @@ export function BucketObjectsPage() {
       pushToast("success", t("toast.signedDownloadReady"));
     },
     onError: (error) => {
-      const message = error instanceof Error ? error.message : t("errors.signObject");
+      const message =
+        error instanceof Error ? error.message : t("errors.signObject");
       pushToast("error", message);
     },
     onSettled: () => {
@@ -210,7 +241,10 @@ export function BucketObjectsPage() {
   });
 
   const updateVisibilityMutation = useMutation({
-    mutationFn: (input: { objectKey: string; visibility: "public" | "private" }) =>
+    mutationFn: (input: {
+      objectKey: string;
+      visibility: "public" | "private";
+    }) =>
       updateObjectVisibility(settings, {
         bucket,
         objectKey: input.objectKey,
@@ -223,6 +257,8 @@ export function BucketObjectsPage() {
 
   const breadcrumbs = getExplorerBreadcrumbs(prefix);
   const entries = entriesQuery.data?.items ?? [];
+  const uploadPending =
+    uploadMutation.isPending || uploadFolderMutation.isPending;
 
   if (!bucket) {
     return (
@@ -262,6 +298,10 @@ export function BucketObjectsPage() {
 
   async function handleUpload(value: UploadDialogValue) {
     await uploadMutation.mutateAsync(value);
+  }
+
+  async function handleUploadFolder(value: UploadFolderDialogValue) {
+    await uploadFolderMutation.mutateAsync(value);
   }
 
   async function handleCreateFolder(name: string) {
@@ -326,13 +366,25 @@ export function BucketObjectsPage() {
         <div className="border-b border-border/70 px-4 py-3">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2">
-              <Button onClick={() => navigate(-1)} size="icon-sm" type="button" variant="outline">
+              <Button
+                onClick={() => navigate(-1)}
+                size="icon-sm"
+                type="button"
+                variant="outline"
+              >
                 <ChevronLeftIcon />
                 <span className="sr-only">{t("explorer.actions.goBack")}</span>
               </Button>
-              <Button onClick={() => navigate(1)} size="icon-sm" type="button" variant="outline">
+              <Button
+                onClick={() => navigate(1)}
+                size="icon-sm"
+                type="button"
+                variant="outline"
+              >
                 <ChevronRightIcon />
-                <span className="sr-only">{t("explorer.actions.goForward")}</span>
+                <span className="sr-only">
+                  {t("explorer.actions.goForward")}
+                </span>
               </Button>
             </div>
 
@@ -343,7 +395,10 @@ export function BucketObjectsPage() {
                 <BreadcrumbList>
                   <BreadcrumbItem>
                     <BreadcrumbLink asChild>
-                      <button onClick={() => handleNavigatePrefix("")} type="button">
+                      <button
+                        onClick={() => handleNavigatePrefix("")}
+                        type="button"
+                      >
                         {bucket}
                       </button>
                     </BreadcrumbLink>
@@ -359,7 +414,9 @@ export function BucketObjectsPage() {
                           ) : (
                             <BreadcrumbLink asChild>
                               <button
-                                onClick={() => handleNavigatePrefix(item.prefix)}
+                                onClick={() =>
+                                  handleNavigatePrefix(item.prefix)
+                                }
                                 type="button"
                               >
                                 {item.label}
@@ -384,7 +441,14 @@ export function BucketObjectsPage() {
                   <UploadObjectDialog
                     currentPrefix={prefix}
                     onSubmit={handleUpload}
-                    pending={uploadMutation.isPending}
+                    pending={uploadPending}
+                    progress={uploadProgress}
+                  />
+
+                  <UploadFolderDialog
+                    currentPrefix={prefix}
+                    onSubmit={handleUploadFolder}
+                    pending={uploadPending}
                     progress={uploadProgress}
                   />
 
@@ -396,7 +460,9 @@ export function BucketObjectsPage() {
 
                   <Button
                     onClick={() => {
-                      void queryClient.invalidateQueries({ queryKey: entriesBaseQueryKey });
+                      void queryClient.invalidateQueries({
+                        queryKey: entriesBaseQueryKey,
+                      });
                     }}
                     type="button"
                     variant="outline"
@@ -413,19 +479,29 @@ export function BucketObjectsPage() {
                   >
                     <FieldGroup className="min-w-0 flex-1">
                       <Field className="min-w-0" orientation="responsive">
-                        <FieldLabel className="sr-only" htmlFor="explorer-search">
+                        <FieldLabel
+                          className="sr-only"
+                          htmlFor="explorer-search"
+                        >
                           {t("explorer.toolbar.search")}
                         </FieldLabel>
                         <Input
                           className="min-w-0"
                           id="explorer-search"
-                          onChange={(event) => setSearchInput(event.target.value)}
+                          onChange={(event) =>
+                            setSearchInput(event.target.value)
+                          }
                           placeholder={t("explorer.toolbar.searchPlaceholder")}
                           value={searchInput}
                         />
                       </Field>
                     </FieldGroup>
-                    <Button className="shrink-0" size="icon-sm" type="submit" variant="outline">
+                    <Button
+                      className="shrink-0"
+                      size="icon-sm"
+                      type="submit"
+                      variant="outline"
+                    >
                       <SearchIcon />
                       <span className="sr-only">{t("common.apply")}</span>
                     </Button>
@@ -439,7 +515,9 @@ export function BucketObjectsPage() {
                 <Alert variant="destructive">
                   <CircleAlertIcon />
                   <AlertTitle>{t("errors.loadEntries")}</AlertTitle>
-                  <AlertDescription>{entriesQuery.error.message}</AlertDescription>
+                  <AlertDescription>
+                    {entriesQuery.error.message}
+                  </AlertDescription>
                 </Alert>
               </div>
             ) : null}
@@ -454,7 +532,11 @@ export function BucketObjectsPage() {
                   <ExplorerTable
                     bucket={bucket}
                     buildPublicUrl={(objectKey) =>
-                      buildPublicObjectURL(settings.apiBaseUrl, bucket, objectKey)
+                      buildPublicObjectURL(
+                        settings.apiBaseUrl,
+                        bucket,
+                        objectKey,
+                      )
                     }
                     deletingPath={deletingPath}
                     entries={entries}

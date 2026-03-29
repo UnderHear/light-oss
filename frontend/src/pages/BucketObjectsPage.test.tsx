@@ -8,6 +8,7 @@ import { renderWithApp } from "../test/test-utils";
 vi.mock("../api/objects", () => ({
   listExplorerEntries: vi.fn(),
   createFolder: vi.fn(),
+  uploadFolder: vi.fn(),
   uploadObject: vi.fn(),
   deleteObject: vi.fn(),
   deleteFolder: vi.fn(),
@@ -21,6 +22,7 @@ import {
   deleteFolder,
   deleteObject,
   listExplorerEntries,
+  uploadFolder,
   updateObjectVisibility,
   uploadObject,
 } from "../api/objects";
@@ -160,7 +162,9 @@ describe("BucketObjectsPage", () => {
       { route: "/buckets/demo?prefix=docs/" },
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "Upload" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Upload" }),
+    );
 
     const file = new File(["hello"], "new.txt", { type: "text/plain" });
     await userEvent.upload(await screen.findByLabelText("File"), file);
@@ -180,8 +184,141 @@ describe("BucketObjectsPage", () => {
     expect(await screen.findByText("new.txt")).toBeInTheDocument();
   });
 
+  it("supports folder upload flow in the current folder", async () => {
+    vi.mocked(listExplorerEntries)
+      .mockResolvedValueOnce({ items: [], next_cursor: "" })
+      .mockResolvedValueOnce({
+        items: [
+          {
+            type: "file",
+            path: "docs/assets/readme.txt",
+            name: "readme.txt",
+            is_empty: null,
+            object_key: "docs/assets/readme.txt",
+            original_filename: "readme.txt",
+            size: 16,
+            content_type: "text/plain",
+            etag: "feedface12345678",
+            visibility: "private",
+            updated_at: "2026-03-25T00:02:00Z",
+          },
+        ],
+        next_cursor: "",
+      });
+
+    vi.mocked(uploadFolder).mockResolvedValue({
+      uploaded_count: 2,
+      items: [
+        {
+          id: 2,
+          bucket_name: "demo",
+          object_key: "docs/assets/readme.txt",
+          original_filename: "readme.txt",
+          size: 16,
+          content_type: "text/plain",
+          etag: "feedface12345678",
+          visibility: "private",
+          created_at: "2026-03-25T00:02:00Z",
+          updated_at: "2026-03-25T00:02:00Z",
+        },
+        {
+          id: 3,
+          bucket_name: "demo",
+          object_key: "docs/assets/images/logo.png",
+          original_filename: "logo.png",
+          size: 24,
+          content_type: "image/png",
+          etag: "deadbeef12345678",
+          visibility: "private",
+          created_at: "2026-03-25T00:02:00Z",
+          updated_at: "2026-03-25T00:02:00Z",
+        },
+      ],
+    });
+
+    renderWithApp(
+      <Routes>
+        <Route path="/buckets/:bucket" element={<BucketObjectsPage />} />
+      </Routes>,
+      { route: "/buckets/demo?prefix=docs/" },
+    );
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Upload folder" }),
+    );
+
+    const readme = new File(["hello"], "readme.txt", { type: "text/plain" });
+    const logo = new File(["png"], "logo.png", { type: "image/png" });
+    Object.defineProperty(readme, "webkitRelativePath", {
+      configurable: true,
+      value: "assets/readme.txt",
+    });
+    Object.defineProperty(logo, "webkitRelativePath", {
+      configurable: true,
+      value: "assets/images/logo.png",
+    });
+
+    await userEvent.upload(await screen.findByLabelText("Folder"), [
+      readme,
+      logo,
+    ]);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Start folder upload" }),
+    );
+
+    await waitFor(() => {
+      expect(uploadFolder).toHaveBeenCalledWith(
+        { apiBaseUrl: "http://localhost:8080", bearerToken: "dev-token" },
+        expect.objectContaining({
+          bucket: "demo",
+          prefix: "docs/",
+          files: [readme, logo],
+        }),
+      );
+    });
+
+    expect(await screen.findByText("readme.txt")).toBeInTheDocument();
+  });
+
+  it("shows an error toast when folder upload fails", async () => {
+    vi.mocked(listExplorerEntries).mockResolvedValue({
+      items: [],
+      next_cursor: "",
+    });
+    vi.mocked(uploadFolder).mockRejectedValue(
+      new Error("folder upload failed"),
+    );
+
+    renderWithApp(
+      <Routes>
+        <Route path="/buckets/:bucket" element={<BucketObjectsPage />} />
+      </Routes>,
+      { route: "/buckets/demo?prefix=docs/" },
+    );
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Upload folder" }),
+    );
+
+    const readme = new File(["hello"], "readme.txt", { type: "text/plain" });
+    Object.defineProperty(readme, "webkitRelativePath", {
+      configurable: true,
+      value: "assets/readme.txt",
+    });
+
+    await userEvent.upload(await screen.findByLabelText("Folder"), readme);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Start folder upload" }),
+    );
+
+    expect(await screen.findByText("folder upload failed")).toBeInTheDocument();
+  });
+
   it("creates a folder from the toolbar dialog", async () => {
-    vi.mocked(listExplorerEntries).mockResolvedValue({ items: [], next_cursor: "" });
+    vi.mocked(listExplorerEntries).mockResolvedValue({
+      items: [],
+      next_cursor: "",
+    });
     vi.mocked(createFolder).mockResolvedValue({
       path: "assets/",
       name: "assets",
@@ -195,12 +332,13 @@ describe("BucketObjectsPage", () => {
       { route: "/buckets/demo" },
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "New folder" }));
-    await userEvent.type(
-      await screen.findByLabelText("Folder name"),
-      "assets",
+    await userEvent.click(
+      await screen.findByRole("button", { name: "New folder" }),
     );
-    await userEvent.click(screen.getByRole("button", { name: "Create folder" }));
+    await userEvent.type(await screen.findByLabelText("Folder name"), "assets");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Create folder" }),
+    );
 
     await waitFor(() => {
       expect(createFolder).toHaveBeenCalledWith(
@@ -242,12 +380,16 @@ describe("BucketObjectsPage", () => {
       { route: "/buckets/demo" },
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete" }),
+    );
 
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText("Delete object?")).toBeInTheDocument();
 
-    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Delete" }),
+    );
 
     await waitFor(() => {
       expect(deleteObject).toHaveBeenCalledWith(
@@ -286,7 +428,9 @@ describe("BucketObjectsPage", () => {
       { route: "/buckets/demo" },
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "Delete folder" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Delete folder" }),
+    );
 
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText("Delete folder?")).toBeInTheDocument();
@@ -296,7 +440,9 @@ describe("BucketObjectsPage", () => {
       ),
     ).toBeInTheDocument();
 
-    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Delete" }),
+    );
 
     await waitFor(() => {
       expect(deleteFolder).toHaveBeenCalledWith(
@@ -335,7 +481,9 @@ describe("BucketObjectsPage", () => {
       { route: "/buckets/demo" },
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "Copy URL" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Copy URL" }),
+    );
 
     await waitFor(() => {
       expect(window.navigator.clipboard.writeText).toHaveBeenCalledWith(
@@ -373,7 +521,9 @@ describe("BucketObjectsPage", () => {
       { route: "/buckets/demo" },
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "View details" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "View details" }),
+    );
 
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("File details")).toBeInTheDocument();
@@ -444,10 +594,16 @@ describe("BucketObjectsPage", () => {
       { route: "/buckets/demo" },
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "View details" }));
+    await userEvent.click(
+      await screen.findByRole("button", { name: "View details" }),
+    );
 
-    await userEvent.click(await screen.findByRole("combobox", { name: "Visibility" }));
-    await userEvent.click(await screen.findByRole("option", { name: "Public" }));
+    await userEvent.click(
+      await screen.findByRole("combobox", { name: "Visibility" }),
+    );
+    await userEvent.click(
+      await screen.findByRole("option", { name: "Public" }),
+    );
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
     await waitFor(() => {
@@ -461,6 +617,8 @@ describe("BucketObjectsPage", () => {
       );
     });
 
-    expect(await screen.findByText("Object visibility updated")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Object visibility updated"),
+    ).toBeInTheDocument();
   });
 });

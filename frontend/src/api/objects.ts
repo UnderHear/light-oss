@@ -2,6 +2,7 @@ import { ApiError, apiRequest, createApiClient } from "./client";
 import type { AxiosProgressEvent } from "axios";
 import type { AppSettings } from "../lib/settings";
 import type {
+  BatchUploadResult,
   ExplorerEntriesResult,
   ObjectItem,
   ObjectListResult,
@@ -20,6 +21,14 @@ export interface UploadObjectParams {
   bucket: string;
   objectKey: string;
   file: File;
+  visibility: ObjectVisibility;
+  onProgress?: (value: number) => void;
+}
+
+export interface UploadFolderParams {
+  bucket: string;
+  prefix: string;
+  files: File[];
   visibility: ObjectVisibility;
   onProgress?: (value: number) => void;
 }
@@ -46,6 +55,11 @@ export interface UpdateObjectVisibilityParams {
   bucket: string;
   objectKey: string;
   visibility: ObjectVisibility;
+}
+
+interface UploadFolderManifestItem {
+  file_field: string;
+  relative_path: string;
 }
 
 export function listObjects(settings: AppSettings, params: ListObjectsParams) {
@@ -76,7 +90,10 @@ export function listExplorerEntries(
   });
 }
 
-export function createFolder(settings: AppSettings, params: CreateFolderParams) {
+export function createFolder(
+  settings: AppSettings,
+  params: CreateFolderParams,
+) {
   return apiRequest(settings, {
     method: "POST",
     url: `/api/v1/buckets/${encodeURIComponent(params.bucket)}/folders`,
@@ -128,6 +145,56 @@ export async function uploadObject(
     });
 
     return response.data.data as ObjectItem;
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error("Upload failed");
+  }
+}
+
+export async function uploadFolder(
+  settings: AppSettings,
+  params: UploadFolderParams,
+) {
+  if (params.files.length === 0) {
+    throw new Error("No files selected");
+  }
+
+  const formData = new FormData();
+  if (params.prefix.trim() !== "") {
+    formData.append("prefix", params.prefix);
+  }
+  formData.append("visibility", params.visibility);
+
+  const manifest: UploadFolderManifestItem[] = [];
+  params.files.forEach((file, index) => {
+    const fileField = `file_${index}`;
+    manifest.push({
+      file_field: fileField,
+      relative_path: getFolderRelativePath(file),
+    });
+    formData.append(fileField, file, file.name);
+  });
+  formData.append("manifest", JSON.stringify(manifest));
+
+  try {
+    const response = await createApiClient(settings).request({
+      method: "POST",
+      url: `/api/v1/buckets/${encodeURIComponent(params.bucket)}/objects/batch`,
+      data: formData,
+      onUploadProgress: (event: AxiosProgressEvent) => {
+        if (!params.onProgress || !event.total) {
+          return;
+        }
+        params.onProgress(Math.round((event.loaded / event.total) * 100));
+      },
+    });
+
+    return response.data.data as BatchUploadResult;
   } catch (error) {
     if (error instanceof ApiError) {
       throw error;
@@ -194,14 +261,28 @@ export function buildPublicObjectURL(
 }
 
 function encodeObjectKey(objectKey: string) {
-  return objectKey
-    .split("/")
-    .map(encodeObjectKeySegment)
-    .join("/");
+  return objectKey.split("/").map(encodeObjectKeySegment).join("/");
 }
 
 function encodeHeaderFilename(filename: string) {
   return encodeURIComponent(filename);
+}
+
+function getFolderRelativePath(file: File) {
+  const relativePath =
+    "webkitRelativePath" in file && typeof file.webkitRelativePath === "string"
+      ? file.webkitRelativePath
+      : "";
+  const normalizedPath = relativePath
+    .replace(/\\/g, "/")
+    .replace(/^\/+/, "")
+    .trim();
+
+  if (!normalizedPath) {
+    throw new Error("Folder upload requires relative paths");
+  }
+
+  return normalizedPath;
 }
 
 function encodeObjectKeySegment(segment: string) {

@@ -27,8 +27,24 @@ type ObjectRepository struct {
 	db *gorm.DB
 }
 
+const objectKeyPrefixLikeClause = "object_key LIKE ? ESCAPE '!'"
+
 func NewObjectRepository(db *gorm.DB) *ObjectRepository {
 	return &ObjectRepository{db: db}
+}
+
+func (r *ObjectRepository) WithDB(db *gorm.DB) *ObjectRepository {
+	if db == nil {
+		return r
+	}
+
+	return &ObjectRepository{db: db}
+}
+
+func (r *ObjectRepository) Transaction(ctx context.Context, fn func(repo *ObjectRepository) error) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return fn(r.WithDB(tx))
+	})
 }
 
 func (r *ObjectRepository) Upsert(ctx context.Context, object *model.Object) (*model.Object, error) {
@@ -78,9 +94,7 @@ func (r *ObjectRepository) ListActive(ctx context.Context, params ListObjectsPar
 	query := r.db.WithContext(ctx).Model(&model.Object{}).
 		Where("bucket_name = ? AND is_deleted = ?", params.BucketName, false)
 
-	if params.Prefix != "" {
-		query = query.Where(`object_key LIKE ? ESCAPE '\'`, likePrefixPattern(params.Prefix))
-	}
+	query = applyObjectKeyPrefixFilter(query, params.Prefix)
 	if params.Cursor != nil {
 		query = query.Where(
 			"(created_at < ?) OR (created_at = ? AND id < ?)",
@@ -104,9 +118,7 @@ func (r *ObjectRepository) ListActiveByPrefixOrdered(ctx context.Context, bucket
 	query := r.db.WithContext(ctx).
 		Where("bucket_name = ? AND is_deleted = ?", bucketName, false)
 
-	if prefix != "" {
-		query = query.Where(`object_key LIKE ? ESCAPE '\'`, likePrefixPattern(prefix))
-	}
+	query = applyObjectKeyPrefixFilter(query, prefix)
 
 	err := query.
 		Order("object_key ASC").
@@ -132,9 +144,7 @@ func (r *ObjectRepository) ExistsActiveWithPrefix(ctx context.Context, bucketNam
 		Model(&model.Object{}).
 		Where("bucket_name = ? AND is_deleted = ?", bucketName, false)
 
-	if prefix != "" {
-		query = query.Where(`object_key LIKE ? ESCAPE '\'`, likePrefixPattern(prefix))
-	}
+	query = applyObjectKeyPrefixFilter(query, prefix)
 
 	if err := query.Count(&count).Error; err != nil {
 		return false, err
@@ -149,7 +159,7 @@ func (r *ObjectRepository) ExistsActiveWithPrefixExceptKey(ctx context.Context, 
 	query := r.db.WithContext(ctx).
 		Model(&model.Object{}).
 		Where("bucket_name = ? AND is_deleted = ?", bucketName, false).
-		Where(`object_key LIKE ? ESCAPE '\'`, likePrefixPattern(prefix))
+		Where(objectKeyPrefixLikeClause, likePrefixPattern(prefix))
 
 	if excludedKey != "" {
 		query = query.Where("object_key <> ?", excludedKey)
@@ -175,7 +185,7 @@ func (r *ObjectRepository) SoftDelete(ctx context.Context, bucketName string, ob
 func (r *ObjectRepository) SoftDeleteByPrefix(ctx context.Context, bucketName string, prefix string) (int64, error) {
 	result := r.db.WithContext(ctx).Model(&model.Object{}).
 		Where("bucket_name = ? AND is_deleted = ?", bucketName, false).
-		Where(`object_key LIKE ? ESCAPE '\'`, likePrefixPattern(prefix)).
+		Where(objectKeyPrefixLikeClause, likePrefixPattern(prefix)).
 		Updates(map[string]any{
 			"is_deleted": true,
 			"updated_at": time.Now().UTC(),
@@ -189,11 +199,19 @@ func likePrefixPattern(prefix string) string {
 
 func escapeLikeValue(value string) string {
 	replacer := strings.NewReplacer(
-		"\\", "\\\\",
-		"%", "\\%",
-		"_", "\\_",
+		"!", "!!",
+		"%", "!%",
+		"_", "!_",
 	)
 	return replacer.Replace(value)
+}
+
+func applyObjectKeyPrefixFilter(query *gorm.DB, prefix string) *gorm.DB {
+	if prefix == "" {
+		return query
+	}
+
+	return query.Where(objectKeyPrefixLikeClause, likePrefixPattern(prefix))
 }
 
 func (r *ObjectRepository) UpdateVisibility(

@@ -147,6 +147,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 	protected.POST("/buckets/:bucket/folders", handler.createFolder)
 	protected.DELETE("/buckets/:bucket/folders", handler.deleteFolder)
 	protected.GET("/buckets/:bucket/entries", handler.listExplorerEntries)
+	protected.POST("/buckets/:bucket/objects/batch", middleware.MaxBodySize(deps.Config.MaxUploadSizeBytes), handler.uploadObjectBatch)
 	protected.PUT("/buckets/:bucket/objects/*key", middleware.MaxBodySize(deps.Config.MaxUploadSizeBytes), handler.uploadObject)
 	protected.PATCH("/buckets/:bucket/objects/visibility/*key", handler.updateObjectVisibility)
 	protected.GET("/buckets/:bucket/objects", handler.listObjects)

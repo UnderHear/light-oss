@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -83,6 +86,11 @@ type explorerListResponse struct {
 
 type signResponse struct {
 	URL string `json:"url"`
+}
+
+type uploadBatchResponse struct {
+	UploadedCount int              `json:"uploaded_count"`
+	Items         []objectResponse `json:"items"`
 }
 
 func TestProtectedRoutesRequireAuth(t *testing.T) {
@@ -260,6 +268,310 @@ func TestUploadDecodesEncodedOriginalFilenameHeader(t *testing.T) {
 	decodeJSON(t, rec.Body.Bytes(), &uploadBody)
 	if uploadBody.Data.OriginalFilename != "中文报告.txt" {
 		t.Fatalf("unexpected original filename %q", uploadBody.Data.OriginalFilename)
+	}
+}
+
+func TestUploadObjectBatchSuccess(t *testing.T) {
+	router := newTestRouter(t, 8*1024)
+
+	createBucket(t, router, "batch-bucket")
+
+	req := newMultipartBatchUploadRequest(
+		t,
+		"/api/v1/buckets/batch-bucket/objects/batch",
+		map[string]string{
+			"prefix":     "docs/",
+			"visibility": "public",
+			"manifest": mustMarshalJSON(t, []map[string]string{
+				{"file_field": "file_0", "relative_path": "assets/readme.txt"},
+				{"file_field": "file_1", "relative_path": "assets/images/logo.png"},
+			}),
+		},
+		map[string]multipartUploadFile{
+			"file_0": {Filename: "readme.txt", Content: "hello world", ContentType: "text/plain"},
+			"file_1": {Filename: "logo.png", Content: "png-bytes", ContentType: "image/png"},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body apiEnvelope[uploadBatchResponse]
+	decodeJSON(t, rec.Body.Bytes(), &body)
+	if body.Data.UploadedCount != 2 {
+		t.Fatalf("expected uploaded_count 2, got %d", body.Data.UploadedCount)
+	}
+	if len(body.Data.Items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(body.Data.Items))
+	}
+	if body.Data.Items[0].ObjectKey != "docs/assets/readme.txt" {
+		t.Fatalf("unexpected first object key %q", body.Data.Items[0].ObjectKey)
+	}
+	if body.Data.Items[1].ObjectKey != "docs/assets/images/logo.png" {
+		t.Fatalf("unexpected second object key %q", body.Data.Items[1].ObjectKey)
+	}
+	if body.Data.Items[0].Visibility != "public" || body.Data.Items[1].Visibility != "public" {
+		t.Fatalf("expected public visibility, got %+v", body.Data.Items)
+	}
+}
+
+func TestUploadObjectBatchValidationErrors(t *testing.T) {
+	router := newTestRouter(t, 8*1024)
+
+	createBucket(t, router, "batch-validation-bucket")
+
+	t.Run("invalid manifest json", func(t *testing.T) {
+		req := newMultipartBatchUploadRequest(
+			t,
+			"/api/v1/buckets/batch-validation-bucket/objects/batch",
+			map[string]string{
+				"prefix":   "docs/",
+				"manifest": "{",
+			},
+			map[string]multipartUploadFile{
+				"file_0": {Filename: "readme.txt", Content: "hello"},
+			},
+		)
+
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d, body=%s", rec.Code, rec.Body.String())
+		}
+
+		var body apiEnvelope[uploadBatchResponse]
+		decodeJSON(t, rec.Body.Bytes(), &body)
+		if body.Error == nil || body.Error.Code != "invalid_batch_manifest" {
+			t.Fatalf("expected invalid_batch_manifest, got %+v", body.Error)
+		}
+	})
+
+	t.Run("missing file part", func(t *testing.T) {
+		req := newMultipartBatchUploadRequest(
+			t,
+			"/api/v1/buckets/batch-validation-bucket/objects/batch",
+			map[string]string{
+				"manifest": mustMarshalJSON(t, []map[string]string{
+					{"file_field": "missing", "relative_path": "assets/readme.txt"},
+				}),
+			},
+			nil,
+		)
+
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400, got %d, body=%s", rec.Code, rec.Body.String())
+		}
+
+		var body apiEnvelope[uploadBatchResponse]
+		decodeJSON(t, rec.Body.Bytes(), &body)
+		if body.Error == nil || body.Error.Code != "batch_file_missing" {
+			t.Fatalf("expected batch_file_missing, got %+v", body.Error)
+		}
+	})
+}
+
+func TestUploadObjectBatchRejectsInvalidFinalObjectKeyFromPrefix(t *testing.T) {
+	router, storageRoot := newTestRouterWithStorageRoot(t, 8*1024)
+
+	createBucket(t, router, "batch-prefix-bucket")
+
+	req := newMultipartBatchUploadRequest(
+		t,
+		"/api/v1/buckets/batch-prefix-bucket/objects/batch",
+		map[string]string{
+			"prefix": "/",
+			"manifest": mustMarshalJSON(t, []map[string]string{
+				{"file_field": "file_0", "relative_path": "assets/readme.txt"},
+			}),
+		},
+		map[string]multipartUploadFile{
+			"file_0": {Filename: "readme.txt", Content: "hello world"},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body apiEnvelope[uploadBatchResponse]
+	decodeJSON(t, rec.Body.Bytes(), &body)
+	if body.Error == nil || body.Error.Code != "invalid_batch_manifest" {
+		t.Fatalf("expected invalid_batch_manifest, got %+v", body.Error)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/buckets/batch-prefix-bucket/objects", nil)
+	listReq.Header.Set("Authorization", "Bearer dev-token")
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", listRec.Code, listRec.Body.String())
+	}
+
+	var listBody apiEnvelope[objectListResponse]
+	decodeJSON(t, listRec.Body.Bytes(), &listBody)
+	if len(listBody.Data.Items) != 0 {
+		t.Fatalf("expected no persisted objects after invalid final key, got %+v", listBody.Data.Items)
+	}
+
+	if files := countFilesUnderRoot(t, storageRoot); files != 0 {
+		t.Fatalf("expected no stored files after invalid final key, got %d", files)
+	}
+}
+
+func TestUploadObjectBatchRejectsOverlongFinalObjectKey(t *testing.T) {
+	router, storageRoot := newTestRouterWithStorageRoot(t, 8*1024)
+
+	createBucket(t, router, "batch-long-key-bucket")
+
+	prefix := strings.Repeat("a", 508) + "/"
+	req := newMultipartBatchUploadRequest(
+		t,
+		"/api/v1/buckets/batch-long-key-bucket/objects/batch",
+		map[string]string{
+			"prefix": prefix,
+			"manifest": mustMarshalJSON(t, []map[string]string{
+				{"file_field": "file_0", "relative_path": "b.txt"},
+			}),
+		},
+		map[string]multipartUploadFile{
+			"file_0": {Filename: "b.txt", Content: "hello world"},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body apiEnvelope[uploadBatchResponse]
+	decodeJSON(t, rec.Body.Bytes(), &body)
+	if body.Error == nil || body.Error.Code != "invalid_batch_manifest" {
+		t.Fatalf("expected invalid_batch_manifest, got %+v", body.Error)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/buckets/batch-long-key-bucket/objects", nil)
+	listReq.Header.Set("Authorization", "Bearer dev-token")
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", listRec.Code, listRec.Body.String())
+	}
+
+	var listBody apiEnvelope[objectListResponse]
+	decodeJSON(t, listRec.Body.Bytes(), &listBody)
+	if len(listBody.Data.Items) != 0 {
+		t.Fatalf("expected no persisted objects after overlong final key, got %+v", listBody.Data.Items)
+	}
+
+	if files := countFilesUnderRoot(t, storageRoot); files != 0 {
+		t.Fatalf("expected no stored files after overlong final key, got %d", files)
+	}
+}
+
+func TestUploadObjectBatchRollsBackAndCleansStorage(t *testing.T) {
+	router, storageRoot := newTestRouterWithStorageRoot(t, 8*1024)
+
+	createBucket(t, router, "batch-rollback-bucket")
+
+	req := newMultipartBatchUploadRequest(
+		t,
+		"/api/v1/buckets/batch-rollback-bucket/objects/batch",
+		map[string]string{
+			"manifest": mustMarshalJSON(t, []map[string]string{
+				{"file_field": "file_0", "relative_path": "assets/readme.txt"},
+				{"file_field": "file_1", "relative_path": "/invalid.txt"},
+			}),
+		},
+		map[string]multipartUploadFile{
+			"file_0": {Filename: "readme.txt", Content: "hello world"},
+			"file_1": {Filename: "invalid.txt", Content: "bad"},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body apiEnvelope[uploadBatchResponse]
+	decodeJSON(t, rec.Body.Bytes(), &body)
+	if body.Error == nil || body.Error.Code != "invalid_batch_manifest" {
+		t.Fatalf("expected invalid_batch_manifest, got %+v", body.Error)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/buckets/batch-rollback-bucket/objects", nil)
+	listReq.Header.Set("Authorization", "Bearer dev-token")
+	listRec := httptest.NewRecorder()
+	router.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", listRec.Code, listRec.Body.String())
+	}
+
+	var listBody apiEnvelope[objectListResponse]
+	decodeJSON(t, listRec.Body.Bytes(), &listBody)
+	if len(listBody.Data.Items) != 0 {
+		t.Fatalf("expected no persisted objects after rollback, got %+v", listBody.Data.Items)
+	}
+
+	if files := countFilesUnderRoot(t, storageRoot); files != 0 {
+		t.Fatalf("expected no stored files after rollback, got %d", files)
+	}
+}
+
+func TestUploadObjectBatchBucketNotFound(t *testing.T) {
+	router := newTestRouter(t, 8*1024)
+
+	req := newMultipartBatchUploadRequest(
+		t,
+		"/api/v1/buckets/missing-bucket/objects/batch",
+		map[string]string{
+			"manifest": mustMarshalJSON(t, []map[string]string{
+				{"file_field": "file_0", "relative_path": "assets/readme.txt"},
+			}),
+		},
+		map[string]multipartUploadFile{
+			"file_0": {Filename: "readme.txt", Content: "hello"},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUploadObjectBatchSizeLimit(t *testing.T) {
+	router := newTestRouter(t, 64)
+
+	createBucket(t, router, "batch-limit-bucket")
+
+	req := newMultipartBatchUploadRequest(
+		t,
+		"/api/v1/buckets/batch-limit-bucket/objects/batch",
+		map[string]string{
+			"manifest": mustMarshalJSON(t, []map[string]string{
+				{"file_field": "file_0", "relative_path": "assets/big.txt"},
+			}),
+		},
+		map[string]multipartUploadFile{
+			"file_0": {Filename: "big.txt", Content: strings.Repeat("a", 256)},
+		},
+	)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d, body=%s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -614,6 +926,11 @@ func TestUpdateObjectVisibility(t *testing.T) {
 }
 
 func newTestRouter(t *testing.T, maxUploadSize int64) *gin.Engine {
+	router, _ := newTestRouterWithStorageRoot(t, maxUploadSize)
+	return router
+}
+
+func newTestRouterWithStorageRoot(t *testing.T, maxUploadSize int64) (*gin.Engine, string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -661,7 +978,7 @@ func newTestRouter(t *testing.T, maxUploadSize int64) *gin.Engine {
 		BucketService: service.NewBucketService(bucketRepo),
 		ObjectService: service.NewObjectService(bucketRepo, objectRepo, localStorage),
 		SignService:   service.NewSignService(signing.NewSigner(cfg.SigningSecret), cfg.PublicBaseURL, cfg.DefaultSignedURLTTLSeconds, cfg.MaxSignedURLTTLSeconds),
-	})
+	}), root
 }
 
 func createBucket(t *testing.T, router *gin.Engine, name string) {
@@ -707,4 +1024,85 @@ func decodeJSON(t *testing.T, body []byte, target any) {
 	if err := json.Unmarshal(body, target); err != nil {
 		t.Fatalf("decode json: %v, body=%s", err, string(body))
 	}
+}
+
+type multipartUploadFile struct {
+	Filename    string
+	Content     string
+	ContentType string
+}
+
+func newMultipartBatchUploadRequest(
+	t *testing.T,
+	targetURL string,
+	fields map[string]string,
+	files map[string]multipartUploadFile,
+) *http.Request {
+	t.Helper()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatalf("write field %s: %v", key, err)
+		}
+	}
+
+	for fieldName, file := range files {
+		header := textproto.MIMEHeader{}
+		header.Set("Content-Disposition", fmt.Sprintf(`form-data; name="%s"; filename="%s"`, fieldName, file.Filename))
+		if file.ContentType != "" {
+			header.Set("Content-Type", file.ContentType)
+		}
+
+		part, err := writer.CreatePart(header)
+		if err != nil {
+			t.Fatalf("create file part %s: %v", fieldName, err)
+		}
+		if _, err := part.Write([]byte(file.Content)); err != nil {
+			t.Fatalf("write file part %s: %v", fieldName, err)
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, targetURL, bytes.NewReader(body.Bytes()))
+	req.Header.Set("Authorization", "Bearer dev-token")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
+}
+
+func mustMarshalJSON(t *testing.T, value any) string {
+	t.Helper()
+
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal json: %v", err)
+	}
+
+	return string(raw)
+}
+
+func countFilesUnderRoot(t *testing.T, root string) int {
+	t.Helper()
+
+	count := 0
+	if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		count++
+		return nil
+	}); err != nil {
+		t.Fatalf("walk storage root: %v", err)
+	}
+
+	return count
 }

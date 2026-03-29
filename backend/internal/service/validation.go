@@ -2,10 +2,10 @@ package service
 
 import (
 	"net/http"
+	"net/url"
 	"path"
 	"regexp"
 	"strings"
-	"net/url"
 
 	"light-oss/backend/internal/model"
 	apperrors "light-oss/backend/internal/pkg/errors"
@@ -53,6 +53,17 @@ func ValidateUserObjectKey(key string) error {
 	}
 
 	return nil
+}
+
+func ValidateUploadRelativePath(relativePath string) error {
+	if strings.TrimSpace(relativePath) == "" {
+		return apperrors.New(http.StatusBadRequest, "invalid_object_key", "relative path is required")
+	}
+	if strings.HasPrefix(relativePath, "/") {
+		return apperrors.New(http.StatusBadRequest, "invalid_object_key", "relative path must not start with /")
+	}
+
+	return ValidateUserObjectKey(relativePath)
 }
 
 func ValidatePrefix(prefix string) error {

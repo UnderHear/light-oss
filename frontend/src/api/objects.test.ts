@@ -1,6 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppSettings } from "../lib/settings";
-import { buildPublicObjectURL, deleteFolder, updateObjectVisibility, uploadObject } from "./objects";
+import {
+  buildPublicObjectURL,
+  deleteFolder,
+  updateObjectVisibility,
+  uploadFolder,
+  uploadObject,
+} from "./objects";
 
 const request = vi.fn();
 const apiRequestMock = vi.fn();
@@ -80,6 +86,47 @@ describe("objects api helpers", () => {
         data: { visibility: "public" },
       }),
     );
+  });
+
+  it("builds a multipart batch upload request for folders", async () => {
+    const readme = new File(["hello"], "readme.txt", { type: "text/plain" });
+    const logo = new File(["png"], "logo.png", { type: "image/png" });
+    Object.defineProperty(readme, "webkitRelativePath", {
+      configurable: true,
+      value: "assets/readme.txt",
+    });
+    Object.defineProperty(logo, "webkitRelativePath", {
+      configurable: true,
+      value: "assets/images/logo.png",
+    });
+
+    await uploadFolder(settings, {
+      bucket: "demo",
+      prefix: "docs/",
+      files: [readme, logo],
+      visibility: "private",
+    });
+
+    expect(request).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: "POST",
+        url: "/api/v1/buckets/demo/objects/batch",
+      }),
+    );
+
+    const formData = request.mock.calls[0]?.[0]?.data as FormData;
+    expect(formData.get("prefix")).toBe("docs/");
+    expect(formData.get("visibility")).toBe("private");
+    expect(formData.get("manifest")).toBe(
+      JSON.stringify([
+        { file_field: "file_0", relative_path: "assets/readme.txt" },
+        { file_field: "file_1", relative_path: "assets/images/logo.png" },
+      ]),
+    );
+    expect(formData.get("file_0")).toBeInstanceOf(File);
+    expect((formData.get("file_0") as File).name).toBe("readme.txt");
+    expect(formData.get("file_1")).toBeInstanceOf(File);
+    expect((formData.get("file_1") as File).name).toBe("logo.png");
   });
 
   it("passes recursive deletion to the folder endpoint when requested", async () => {

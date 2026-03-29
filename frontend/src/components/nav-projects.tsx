@@ -4,6 +4,7 @@ import {
   ServerIcon,
   ShieldCheckIcon,
 } from "lucide-react"
+import { ConnectionHealthStatus } from "@/components/ConnectionHealthStatus"
 import {
   SidebarGroup,
   SidebarGroupLabel,
@@ -41,6 +42,9 @@ export function NavProjects({
                 : t("header.authMissing")}
             </span>
           </div>
+        </SidebarMenuItem>
+        <SidebarMenuItem>
+          <ConnectionHealthStatus className="px-2 py-1" />
         </SidebarMenuItem>
       </SidebarMenu>
     </SidebarGroup>

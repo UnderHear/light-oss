@@ -1,5 +1,6 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { ShieldAlertIcon, SlidersHorizontalIcon } from "lucide-react";
+import { getHealthStatus } from "@/api/health";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -17,6 +18,12 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ConnectionHealthStatus } from "@/components/ConnectionHealthStatus";
+import {
+  createCheckingConnectionHealthStates,
+  resolveConnectionHealthStates,
+  type ConnectionHealthStates,
+} from "@/lib/health";
 import { LocaleToggle } from "@/components/LocaleToggle";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useToast } from "@/components/ToastProvider";
@@ -29,14 +36,74 @@ export function SettingsPage() {
   const { pushToast } = useToast();
   const [apiBaseUrl, setApiBaseUrl] = useState(settings.apiBaseUrl);
   const [bearerToken, setBearerToken] = useState(settings.bearerToken);
+  const [isBearerTokenVisible, setIsBearerTokenVisible] = useState(false);
+  const [manualHealthStates, setManualHealthStates] =
+    useState<ConnectionHealthStates | null>(null);
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const testRequestRef = useRef(0);
+
+  const draftSettings = {
+    apiBaseUrl: apiBaseUrl.trim(),
+    bearerToken: bearerToken.trim(),
+  };
+
+  function clearManualHealthStates() {
+    testRequestRef.current += 1;
+    setManualHealthStates(null);
+    setIsTestingConnection(false);
+  }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    clearManualHealthStates();
     saveSettings({
-      apiBaseUrl: apiBaseUrl.trim(),
-      bearerToken: bearerToken.trim(),
+      apiBaseUrl: draftSettings.apiBaseUrl,
+      bearerToken: draftSettings.bearerToken,
     });
     pushToast("success", t("toast.settingsSaved"));
+  }
+
+  async function handleTestConnection() {
+    if (draftSettings.apiBaseUrl === "") {
+      return;
+    }
+
+    const requestId = testRequestRef.current + 1;
+    testRequestRef.current = requestId;
+    setIsTestingConnection(true);
+    setManualHealthStates(createCheckingConnectionHealthStates());
+
+    try {
+      const result = await getHealthStatus(draftSettings);
+      if (testRequestRef.current !== requestId) {
+        return;
+      }
+
+      setManualHealthStates(
+        resolveConnectionHealthStates({
+          isConfigured: true,
+          isPending: false,
+          error: null,
+          data: result,
+        }),
+      );
+    } catch (error) {
+      if (testRequestRef.current !== requestId) {
+        return;
+      }
+
+      setManualHealthStates(
+        resolveConnectionHealthStates({
+          isConfigured: true,
+          isPending: false,
+          error,
+        }),
+      );
+    } finally {
+      if (testRequestRef.current === requestId) {
+        setIsTestingConnection(false);
+      }
+    }
   }
 
   return (
@@ -55,9 +122,14 @@ export function SettingsPage() {
           <CardHeader>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <CardTitle>{t("settings.connection.title")}</CardTitle>
-              <Badge className="w-fit" variant="secondary">
-                {t("common.localStorage")}
-              </Badge>
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                <ConnectionHealthStatus
+                  states={manualHealthStates ?? undefined}
+                />
+                <Badge className="w-fit" variant="secondary">
+                  {t("common.localStorage")}
+                </Badge>
+              </div>
             </div>
             <p className="text-sm text-muted-foreground">
               {t("settings.connection.description")}
@@ -72,7 +144,10 @@ export function SettingsPage() {
                   </FieldLabel>
                   <Input
                     id="api-base-url"
-                    onChange={(event) => setApiBaseUrl(event.target.value)}
+                    onChange={(event) => {
+                      setApiBaseUrl(event.target.value);
+                      clearManualHealthStates();
+                    }}
                     placeholder="http://localhost:8080"
                     value={apiBaseUrl}
                   />
@@ -85,20 +160,48 @@ export function SettingsPage() {
                   <FieldLabel htmlFor="bearer-token">
                     {t("settings.connection.bearerToken")}
                   </FieldLabel>
-                  <Input
-                    id="bearer-token"
-                    onChange={(event) => setBearerToken(event.target.value)}
-                    placeholder="dev-token"
-                    type="password"
-                    value={bearerToken}
-                  />
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1">
+                      <Input
+                        id="bearer-token"
+                        onChange={(event) => {
+                          setBearerToken(event.target.value);
+                          clearManualHealthStates();
+                        }}
+                        placeholder="dev-token"
+                        type={isBearerTokenVisible ? "text" : "password"}
+                        value={bearerToken}
+                      />
+                    </div>
+                    <Button
+                      onClick={() =>
+                        setIsBearerTokenVisible((current) => !current)
+                      }
+                      type="button"
+                      variant="outline"
+                    >
+                      {isBearerTokenVisible
+                        ? t("settings.connection.hideToken")
+                        : t("settings.connection.showToken")}
+                    </Button>
+                  </div>
                   <FieldDescription>
                     {t("settings.connection.bearerTokenDescription")}
                   </FieldDescription>
                 </Field>
               </FieldGroup>
             </CardContent>
-            <CardFooter className="justify-end">
+            <CardFooter className="flex flex-wrap justify-end gap-2">
+              <Button
+                disabled={draftSettings.apiBaseUrl === "" || isTestingConnection}
+                onClick={handleTestConnection}
+                type="button"
+                variant="outline"
+              >
+                {isTestingConnection
+                  ? t("settings.connection.testingConnection")
+                  : t("settings.connection.testConnection")}
+              </Button>
               <Button type="submit">{t("common.save")}</Button>
             </CardFooter>
           </form>

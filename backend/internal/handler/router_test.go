@@ -105,6 +105,39 @@ func TestProtectedRoutesRequireAuth(t *testing.T) {
 	}
 }
 
+func TestProtectedHealthzRequiresAuthAndReturnsHealthState(t *testing.T) {
+	router := newTestRouter(t, 1024)
+
+	unauthorizedReq := httptest.NewRequest(http.MethodGet, "/api/v1/healthz", nil)
+	unauthorizedRec := httptest.NewRecorder()
+	router.ServeHTTP(unauthorizedRec, unauthorizedReq)
+	if unauthorizedRec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", unauthorizedRec.Code)
+	}
+
+	authorizedReq := httptest.NewRequest(http.MethodGet, "/api/v1/healthz", nil)
+	authorizedReq.Header.Set("Authorization", "Bearer dev-token")
+	authorizedRec := httptest.NewRecorder()
+	router.ServeHTTP(authorizedRec, authorizedReq)
+	if authorizedRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d, body=%s", authorizedRec.Code, authorizedRec.Body.String())
+	}
+
+	var body apiEnvelope[map[string]any]
+	decodeJSON(t, authorizedRec.Body.Bytes(), &body)
+
+	status, ok := body.Data["status"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected status object, got %+v", body.Data["status"])
+	}
+	if status["service"] != "ok" {
+		t.Fatalf("expected service ok, got %+v", status["service"])
+	}
+	if status["db"] != "ok" {
+		t.Fatalf("expected db ok, got %+v", status["db"])
+	}
+}
+
 func TestUploadAndDownloadPublicObject(t *testing.T) {
 	router := newTestRouter(t, 1024)
 

@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { AxiosRequestConfig, AxiosResponse } from "axios";
+import type { AxiosRequestConfig } from "axios";
 import type { ApiEnvelope } from "./types";
 import type { AppSettings } from "../lib/settings";
 
@@ -42,21 +42,29 @@ export function createApiClient(settings: AppSettings) {
   return client;
 }
 
-export async function apiRequest<T>(
+export async function apiEnvelopeRequest<T>(
   settings: AppSettings,
   request: AxiosRequestConfig,
-): Promise<T> {
+): Promise<ApiEnvelope<T>> {
   try {
     const response =
       await createApiClient(settings).request<ApiEnvelope<T>>(request);
-    return unwrapEnvelope(response);
+    return response.data;
   } catch (error) {
     throw normalizeApiError(error);
   }
 }
 
-function unwrapEnvelope<T>(response: AxiosResponse<ApiEnvelope<T>>): T {
-  return response.data.data;
+export async function apiRequest<T>(
+  settings: AppSettings,
+  request: AxiosRequestConfig,
+): Promise<T> {
+  const envelope = await apiEnvelopeRequest<T>(settings, request);
+  return unwrapEnvelope(envelope);
+}
+
+function unwrapEnvelope<T>(envelope: ApiEnvelope<T>): T {
+  return envelope.data;
 }
 
 function normalizeApiError(error: unknown): ApiError {

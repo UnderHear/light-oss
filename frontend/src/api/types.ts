@@ -84,3 +84,13 @@ export interface SignedDownloadResult {
   url: string;
   expires_at: number;
 }
+
+export type HealthState = "ok" | "error";
+
+export interface HealthStatusResult {
+  status: {
+    service: HealthState;
+    db: HealthState;
+  };
+  version: string;
+}

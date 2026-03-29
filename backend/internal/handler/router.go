@@ -141,6 +141,7 @@ func NewRouter(deps Dependencies) *gin.Engine {
 
 	protected := api.Group("")
 	protected.Use(deps.AuthValidator.RequireBearer())
+	protected.GET("/healthz", handler.healthz)
 	protected.POST("/buckets", handler.createBucket)
 	protected.GET("/buckets", handler.listBuckets)
 	protected.GET("/buckets/:bucket/folders", handler.listFolders)

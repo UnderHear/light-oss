@@ -2,9 +2,11 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 
@@ -25,31 +27,43 @@ type uploadBatchResponse struct {
 	Items         []objectResponse `json:"items"`
 }
 
-func (h *apiHandler) uploadObjectBatch(c *gin.Context) {
-	if err := c.Request.ParseMultipartForm(h.cfg.MaxMultipartMemoryBytes); err != nil {
-		if strings.Contains(err.Error(), "http: request body too large") {
-			response.Error(c, apperrors.New(http.StatusRequestEntityTooLarge, "payload_too_large", "request body exceeds configured upload size"))
-			return
-		}
+type streamedUploadBatchFile struct {
+	Filename    string
+	ContentType string
+	TempPath    string
+	PartCount   int
+}
 
+func (h *apiHandler) uploadObjectBatch(c *gin.Context) {
+	reader, err := c.Request.MultipartReader()
+	if err != nil {
 		response.Error(c, apperrors.New(http.StatusBadRequest, "invalid_multipart_request", "multipart form is invalid"))
 		return
 	}
 
-	form := c.Request.MultipartForm
-	if form == nil {
-		response.Error(c, apperrors.New(http.StatusBadRequest, "invalid_multipart_request", "multipart form is invalid"))
+	tempDir, err := os.MkdirTemp("", "light-oss-batch-*")
+	if err != nil {
+		response.Error(c, apperrors.Wrap(http.StatusInternalServerError, "batch_file_buffer_failed", "failed to buffer uploaded files", err))
 		return
 	}
 	defer func() {
-		_ = form.RemoveAll()
+		_ = os.RemoveAll(tempDir)
 	}()
 
-	manifest, err := parseUploadBatchManifest(form)
+	fileParts, formValues, err := readBatchMultipartRequest(reader, tempDir)
 	if err != nil {
 		response.Error(c, err)
 		return
 	}
+
+	manifest, err := parseUploadBatchManifestValue(formValues["manifest"])
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
+
+	prefix := strings.TrimSpace(formValues["prefix"])
+	visibility := strings.TrimSpace(formValues["visibility"])
 
 	seenFileFields := make(map[string]struct{}, len(manifest))
 	items := make([]service.UploadObjectBatchItemInput, 0, len(manifest))
@@ -66,14 +80,14 @@ func (h *apiHandler) uploadObjectBatch(c *gin.Context) {
 		}
 		seenFileFields[fileField] = struct{}{}
 
-		fileHeader, err := getSingleMultipartFile(form, fileField)
+		filePart, err := getSingleStreamedMultipartFile(fileParts, fileField)
 		if err != nil {
 			response.Error(c, err)
 			return
 		}
 
-		currentFileHeader := fileHeader
-		originalFilename := strings.TrimSpace(currentFileHeader.Filename)
+		currentFilePart := filePart
+		originalFilename := strings.TrimSpace(currentFilePart.Filename)
 		if originalFilename == "" {
 			originalFilename = path.Base(relativePath)
 		}
@@ -81,9 +95,9 @@ func (h *apiHandler) uploadObjectBatch(c *gin.Context) {
 		items = append(items, service.UploadObjectBatchItemInput{
 			RelativePath:     relativePath,
 			OriginalFilename: originalFilename,
-			ContentType:      currentFileHeader.Header.Get("Content-Type"),
+			ContentType:      currentFilePart.ContentType,
 			Open: func() (io.ReadCloser, error) {
-				file, err := currentFileHeader.Open()
+				file, err := os.Open(currentFilePart.TempPath)
 				if err != nil {
 					return nil, err
 				}
@@ -95,8 +109,8 @@ func (h *apiHandler) uploadObjectBatch(c *gin.Context) {
 
 	result, err := h.objectService.UploadBatch(c.Request.Context(), service.UploadObjectBatchInput{
 		BucketName: c.Param("bucket"),
-		Prefix:     firstMultipartValue(form.Value, "prefix"),
-		Visibility: firstMultipartValue(form.Value, "visibility"),
+		Prefix:     prefix,
+		Visibility: visibility,
 		Items:      items,
 	})
 	if err != nil {
@@ -115,8 +129,70 @@ func (h *apiHandler) uploadObjectBatch(c *gin.Context) {
 	})
 }
 
-func parseUploadBatchManifest(form *multipart.Form) ([]uploadBatchManifestItemRequest, error) {
-	rawManifest := firstMultipartValue(form.Value, "manifest")
+func readBatchMultipartRequest(
+	reader *multipart.Reader,
+	tempDir string,
+) (map[string]*streamedUploadBatchFile, map[string]string, error) {
+	fileParts := make(map[string]*streamedUploadBatchFile)
+	formValues := make(map[string]string)
+
+	for {
+		part, err := reader.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			if isRequestBodyTooLarge(err) {
+				return nil, nil, apperrors.New(http.StatusRequestEntityTooLarge, "payload_too_large", "request body exceeds configured upload size")
+			}
+
+			return nil, nil, apperrors.New(http.StatusBadRequest, "invalid_multipart_request", "multipart form is invalid")
+		}
+
+		formName := strings.TrimSpace(part.FormName())
+		if formName == "" {
+			if err := drainMultipartPart(part); err != nil {
+				return nil, nil, err
+			}
+			continue
+		}
+
+		if part.FileName() == "" {
+			value, err := readMultipartFieldValue(part)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, exists := formValues[formName]; !exists {
+				formValues[formName] = value
+			}
+			continue
+		}
+
+		filename := part.FileName()
+		contentType := part.Header.Get("Content-Type")
+		tempPath, err := writeMultipartFilePart(tempDir, part)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		filePart, exists := fileParts[formName]
+		if !exists {
+			fileParts[formName] = &streamedUploadBatchFile{
+				Filename:    filename,
+				ContentType: contentType,
+				TempPath:    tempPath,
+				PartCount:   1,
+			}
+			continue
+		}
+
+		filePart.PartCount++
+	}
+
+	return fileParts, formValues, nil
+}
+
+func parseUploadBatchManifestValue(rawManifest string) ([]uploadBatchManifestItemRequest, error) {
 	if strings.TrimSpace(rawManifest) == "" {
 		return nil, apperrors.New(http.StatusBadRequest, "invalid_batch_manifest", "manifest is required")
 	}
@@ -132,23 +208,84 @@ func parseUploadBatchManifest(form *multipart.Form) ([]uploadBatchManifestItemRe
 	return manifest, nil
 }
 
-func getSingleMultipartFile(form *multipart.Form, fileField string) (*multipart.FileHeader, error) {
-	files := form.File[fileField]
-	if len(files) == 0 {
+func getSingleStreamedMultipartFile(
+	fileParts map[string]*streamedUploadBatchFile,
+	fileField string,
+) (*streamedUploadBatchFile, error) {
+	filePart, exists := fileParts[fileField]
+	if !exists {
 		return nil, apperrors.New(http.StatusBadRequest, "batch_file_missing", "manifest references a missing file")
 	}
-	if len(files) > 1 {
+	if filePart.PartCount > 1 {
 		return nil, apperrors.New(http.StatusBadRequest, "invalid_batch_manifest", "manifest must reference exactly one file per field")
 	}
 
-	return files[0], nil
+	return filePart, nil
 }
 
-func firstMultipartValue(values map[string][]string, key string) string {
-	items := values[key]
-	if len(items) == 0 {
-		return ""
+func readMultipartFieldValue(part *multipart.Part) (string, error) {
+	rawValue, err := io.ReadAll(part)
+	if err != nil {
+		if isRequestBodyTooLarge(err) {
+			return "", apperrors.New(http.StatusRequestEntityTooLarge, "payload_too_large", "request body exceeds configured upload size")
+		}
+
+		return "", apperrors.New(http.StatusBadRequest, "invalid_multipart_request", "multipart form is invalid")
+	}
+	if err := part.Close(); err != nil {
+		return "", apperrors.New(http.StatusBadRequest, "invalid_multipart_request", "multipart form is invalid")
 	}
 
-	return strings.TrimSpace(items[0])
+	return strings.TrimSpace(string(rawValue)), nil
+}
+
+func writeMultipartFilePart(tempDir string, part *multipart.Part) (string, error) {
+	tempFile, err := os.CreateTemp(tempDir, "part-*")
+	if err != nil {
+		_ = part.Close()
+		return "", apperrors.Wrap(http.StatusInternalServerError, "batch_file_buffer_failed", "failed to buffer uploaded files", err)
+	}
+
+	tempPath := tempFile.Name()
+	if _, err := io.Copy(tempFile, part); err != nil {
+		_ = tempFile.Close()
+		_ = part.Close()
+		_ = os.Remove(tempPath)
+		if isRequestBodyTooLarge(err) {
+			return "", apperrors.New(http.StatusRequestEntityTooLarge, "payload_too_large", "request body exceeds configured upload size")
+		}
+
+		return "", apperrors.New(http.StatusBadRequest, "invalid_multipart_request", "multipart form is invalid")
+	}
+	if err := tempFile.Close(); err != nil {
+		_ = part.Close()
+		_ = os.Remove(tempPath)
+		return "", apperrors.Wrap(http.StatusInternalServerError, "batch_file_buffer_failed", "failed to buffer uploaded files", err)
+	}
+	if err := part.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return "", apperrors.New(http.StatusBadRequest, "invalid_multipart_request", "multipart form is invalid")
+	}
+
+	return tempPath, nil
+}
+
+func drainMultipartPart(part *multipart.Part) error {
+	if _, err := io.Copy(io.Discard, part); err != nil {
+		_ = part.Close()
+		if isRequestBodyTooLarge(err) {
+			return apperrors.New(http.StatusRequestEntityTooLarge, "payload_too_large", "request body exceeds configured upload size")
+		}
+
+		return apperrors.New(http.StatusBadRequest, "invalid_multipart_request", "multipart form is invalid")
+	}
+	if err := part.Close(); err != nil {
+		return apperrors.New(http.StatusBadRequest, "invalid_multipart_request", "multipart form is invalid")
+	}
+
+	return nil
+}
+
+func isRequestBodyTooLarge(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "http: request body too large")
 }

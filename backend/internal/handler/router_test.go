@@ -351,6 +351,48 @@ func TestUploadObjectBatchSuccess(t *testing.T) {
 	}
 }
 
+func TestUploadObjectBatchSupportsMoreThanThousandFiles(t *testing.T) {
+	router := newTestRouter(t, 2*1024*1024)
+
+	createBucket(t, router, "batch-many-files-bucket")
+
+	manifest := make([]map[string]string, 0, 1001)
+	files := make(map[string]multipartUploadFile, 1001)
+	for i := 0; i < 1001; i++ {
+		fieldName := fmt.Sprintf("file_%d", i)
+		filename := fmt.Sprintf("asset-%d.txt", i)
+		manifest = append(manifest, map[string]string{
+			"file_field":    fieldName,
+			"relative_path": "assets/" + filename,
+		})
+		files[fieldName] = multipartUploadFile{
+			Filename: filename,
+			Content:  "x",
+		}
+	}
+
+	req := newMultipartBatchUploadRequest(
+		t,
+		"/api/v1/buckets/batch-many-files-bucket/objects/batch",
+		map[string]string{
+			"manifest": mustMarshalJSON(t, manifest),
+		},
+		files,
+	)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body apiEnvelope[uploadBatchResponse]
+	decodeJSON(t, rec.Body.Bytes(), &body)
+	if body.Data.UploadedCount != 1001 {
+		t.Fatalf("expected 1001 uploaded files, got %d", body.Data.UploadedCount)
+	}
+}
+
 func TestUploadObjectBatchValidationErrors(t *testing.T) {
 	router := newTestRouter(t, 8*1024)
 

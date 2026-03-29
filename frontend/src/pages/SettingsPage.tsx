@@ -2,7 +2,13 @@ import { FormEvent, useState } from "react";
 import { ShieldAlertIcon, SlidersHorizontalIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Field,
   FieldDescription,
@@ -36,10 +42,6 @@ export function SettingsPage() {
   return (
     <section className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <Badge variant="outline">{t("settings.title")}</Badge>
-          <Badge variant="secondary">{t("common.localStorage")}</Badge>
-        </div>
         <h1 className="text-3xl font-semibold tracking-tight">
           {t("settings.title")}
         </h1>
@@ -51,7 +53,12 @@ export function SettingsPage() {
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
         <Card className="border-border/70 bg-card">
           <CardHeader>
-            <CardTitle>{t("settings.connection.title")}</CardTitle>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <CardTitle>{t("settings.connection.title")}</CardTitle>
+              <Badge className="w-fit" variant="secondary">
+                {t("common.localStorage")}
+              </Badge>
+            </div>
             <p className="text-sm text-muted-foreground">
               {t("settings.connection.description")}
             </p>
@@ -108,7 +115,9 @@ export function SettingsPage() {
             <CardContent>
               <FieldGroup>
                 <Field>
-                  <FieldLabel>{t("settings.preferences.localeLabel")}</FieldLabel>
+                  <FieldLabel>
+                    {t("settings.preferences.localeLabel")}
+                  </FieldLabel>
                   <LocaleToggle />
                   <FieldDescription>
                     {t("settings.preferences.localeDescription")}
@@ -116,7 +125,9 @@ export function SettingsPage() {
                 </Field>
 
                 <Field>
-                  <FieldLabel>{t("settings.preferences.themeLabel")}</FieldLabel>
+                  <FieldLabel>
+                    {t("settings.preferences.themeLabel")}
+                  </FieldLabel>
                   <ThemeToggle />
                   <FieldDescription>
                     {t("settings.preferences.themeDescription")}
@@ -135,7 +146,9 @@ export function SettingsPage() {
           <Alert>
             <ShieldAlertIcon />
             <AlertTitle>{t("settings.security.title")}</AlertTitle>
-            <AlertDescription>{t("settings.security.description")}</AlertDescription>
+            <AlertDescription>
+              {t("settings.security.description")}
+            </AlertDescription>
           </Alert>
         </div>
       </div>

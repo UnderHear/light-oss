@@ -101,7 +101,7 @@ export function Layout() {
         </header>
 
         <main className="flex flex-1 overflow-hidden">
-          <div className="flex min-h-0 w-full flex-1 flex-col gap-6 overflow-auto px-2 py-2 md:px-3 md:py-3">
+          <div className="flex min-h-0 w-full flex-1 flex-col gap-6 overflow-auto px-4 py-4 md:px-6 md:py-6">
             <Outlet />
           </div>
         </main>

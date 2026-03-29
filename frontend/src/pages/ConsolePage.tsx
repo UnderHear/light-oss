@@ -3,7 +3,6 @@ import {
   BoxesIcon,
   CircleAlertIcon,
   Clock3Icon,
-  LayoutDashboardIcon,
   ServerCogIcon,
   ShieldCheckIcon,
 } from "lucide-react";
@@ -48,10 +47,6 @@ export function ConsolePage() {
     <section className="flex flex-col gap-6">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex flex-col gap-2">
-          <Badge className="w-fit gap-1.5" variant="outline">
-            <LayoutDashboardIcon className="size-3.5" />
-            {t("console.title")}
-          </Badge>
           <h1 className="text-3xl font-semibold tracking-tight">
             {t("console.title")}
           </h1>
@@ -102,9 +97,7 @@ export function ConsolePage() {
           description={t("header.connection")}
           icon={ShieldCheckIcon}
           title={t("buckets.overview.authStatus")}
-          value={
-            tokenConfigured ? t("common.configured") : t("common.missing")
-          }
+          value={tokenConfigured ? t("common.configured") : t("common.missing")}
         />
         <StatCard
           description={
@@ -127,9 +120,7 @@ export function ConsolePage() {
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium">{t("header.connection")}</p>
             <Badge variant="outline">
-              {tokenConfigured
-                ? t("common.configured")
-                : t("common.missing")}
+              {tokenConfigured ? t("common.configured") : t("common.missing")}
             </Badge>
           </div>
           <div className="rounded-xl border border-border/70 bg-muted px-3 py-3 text-sm text-muted-foreground">
